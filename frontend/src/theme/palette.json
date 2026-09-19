@@ -1,0 +1,12 @@
+{
+  "background": "#F7F9F5",
+  "surface": "#FFFFFF",
+  "surfaceMuted": "#EAF1E8",
+  "action": "#1D5C3B",
+  "actionPressed": "#16462D",
+  "ink": "#16231A",
+  "muted": "#5B6A5D",
+  "line": "#D5E0D4",
+  "danger": "#A43D2E",
+  "dangerSoft": "#F9E9E6"
+}

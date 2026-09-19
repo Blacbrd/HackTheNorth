@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Hampy",
+    "slug": "hampy-shelf-robot",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/hampy-icon.png",
+    "scheme": "hampy",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "icon": "./assets/images/hampy-icon.png"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#EAF1E8",
+        "foregroundImage": "./assets/images/hampy-foreground.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/hampy-icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Hampy to record a request for transcription."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#EAF1E8",
+          "image": "./assets/images/hampy-foreground.png",
+          "imageWidth": 76
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
