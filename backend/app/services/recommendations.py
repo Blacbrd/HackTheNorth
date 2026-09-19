@@ -1,5 +1,5 @@
 from app.clients.gemini import GeminiClient, GeminiClientError
-from app.clients.robot import RobotClient, RobotCommandError
+from app.clients.robot import RobotClient
 from app.repositories.storage import ShelfNotFoundError, StorageRepository
 from app.schemas.recommendations import GeminiRecommendation, RecommendationResponse
 from app.services.robot_jobs import RobotJobService
@@ -14,10 +14,6 @@ class InvalidRecommendationError(Exception):
 
 
 class RecommendationProviderError(Exception):
-    pass
-
-
-class RobotDispatchError(Exception):
     pass
 
 
@@ -50,17 +46,9 @@ class RecommendationService:
             self._note_failure(user_input, "missing")
             raise
         if send_to_robot:
-            try:
-                self.robot.send_pick_command(recommendation)
-            except RobotCommandError as error:
-                self._note_failure(user_input, "fault")
-                raise RobotDispatchError(str(error)) from error
+            self.robot.send_pick_command(recommendation)
             if self.jobs is not None:
-                self.jobs.start(
-                    recommendation,
-                    user_input,
-                    simulated=not self.robot.enabled,
-                )
+                self.jobs.start(recommendation, user_input)
         return RecommendationResponse(**recommendation.model_dump(), source=source)
 
     def _note_failure(self, user_input: str, failure: str) -> None:

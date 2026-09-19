@@ -37,40 +37,22 @@ function resolveApiUrl(): string {
 
 export const apiUrl = resolveApiUrl();
 
-function apiCandidates(): string[] {
-  const candidates = [apiUrl];
-  if (Platform.OS === "web" && globalThis.location?.hostname === "localhost") {
-    candidates.push(`http://127.0.0.1:${API_PORT}`);
-  }
-  return Array.from(new Set(candidates));
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
-  let lastUrl = apiUrl;
-  for (const baseUrl of apiCandidates()) {
-    lastUrl = baseUrl;
-    try {
-      response = await fetch(`${baseUrl}${path}`, init);
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(
-          body.detail || `Request failed (${response.status}). Try again.`,
-        );
-      }
-      return response.json() as Promise<T>;
-    } catch (error) {
-      if (baseUrl === apiCandidates().at(-1)) {
-        if (error instanceof Error && !error.message.includes("Failed to fetch")) {
-          throw error;
-        }
-        break;
-      }
-    }
+  try {
+    response = await fetch(`${apiUrl}${path}`, init);
+  } catch {
+    throw new Error(
+      `Cannot reach the API at ${apiUrl}. Check the server is running and that this device is on the same network.`,
+    );
   }
-  throw new Error(
-    `Cannot reach the API at ${lastUrl}. Check the server is running and that this device is on the same network.`,
-  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(
+      body.detail || `Request failed (${response.status}). Try again.`,
+    );
+  }
+  return response.json() as Promise<T>;
 }
 
 export const shelvesApi = {

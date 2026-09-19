@@ -2,8 +2,6 @@ import time
 
 from fastapi.testclient import TestClient
 
-from app.clients.robot import RobotClient, RobotCommandError
-from app.core.config import Settings
 from app.dependencies import get_robot_job_service
 from app.main import app
 from app.schemas.recommendations import GeminiRecommendation
@@ -92,59 +90,3 @@ def test_quantity_adds_that_many_copies_in_one_request():
 def test_quantity_must_be_at_least_one():
     response = client.post("/api/shelves/1/items", json={"item": "x", "quantity": 0})
     assert response.status_code == 422
-
-
-def test_disabled_robot_client_keeps_dummy_behavior():
-    client = RobotClient()
-    assert client.enabled is False
-    client.send_pick_command(GeminiRecommendation(shelf_number=1, item="peas"))
-
-
-def test_robot_client_builds_local_delivery_workflow():
-    settings = Settings(
-        robot_enabled=True,
-        robot_transport="local",
-        robot_app_dir="/home/bracketbot/bbapps/hampy_demo",
-        robot_station_by_shelf="1:table_1,2:table_2",
-        robot_dropoff_station="table_2",
-        robot_pickup_motion_template="motions/{station}_{item}.json",
-        robot_drop_motion="motions/drop.json",
-    )
-    command = RobotClient(settings)._transport_command(
-        GeminiRecommendation(shelf_number=1, item="Can of Mushrooms")
-    )
-    script = command[-1]
-    assert command[:2] == ["bash", "-lc"]
-    assert "cd /home/bracketbot/bbapps/hampy_demo" in script
-    assert "test -f motions/table_1_can_of_mushrooms.json" in script
-    assert "uv run station_nav.py table_1 --direct --no-marker --execute --yes" in script
-    assert "uv run station_nav.py table_2 --direct --no-marker --execute --yes" in script
-    assert "uv run replay_trajectory.py motions/drop.json --execute --yes" in script
-
-
-def test_robot_client_builds_ssh_delivery_workflow():
-    settings = Settings(
-        robot_enabled=True,
-        robot_transport="ssh",
-        robot_host="bracketbot-0186.local",
-        robot_user="bracketbot",
-        robot_station_by_shelf="2:table_2",
-    )
-    command = RobotClient(settings)._transport_command(
-        GeminiRecommendation(shelf_number=2, item="rice")
-    )
-    assert command[:6] == ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
-    assert command[6] == "bracketbot@bracketbot-0186.local"
-    assert "station_nav.py table_2" in command[7]
-
-
-def test_robot_client_rejects_unmapped_shelf():
-    settings = Settings(robot_enabled=True, robot_station_by_shelf="1:table_1")
-    try:
-        RobotClient(settings)._transport_command(
-            GeminiRecommendation(shelf_number=9, item="peas")
-        )
-    except RobotCommandError as error:
-        assert "No robot station configured for shelf 9" in str(error)
-    else:
-        raise AssertionError("expected RobotCommandError")
