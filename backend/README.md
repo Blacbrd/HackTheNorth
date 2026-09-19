@@ -9,10 +9,10 @@ cd backend
 Copy-Item .env.example .env
 # Add your Gemini API key to .env
 python -m uv sync
-python -m uv run uvicorn app.main:app --reload
+python -m uv run uvicorn app.main:app --host 0.0.0.0 --reload
 ```
 
-The API runs at `http://127.0.0.1:8000`; interactive docs are at `/docs`.
+The API is available locally at `http://127.0.0.1:8000`; `--host 0.0.0.0` also makes it reachable from an Expo Go phone on the same network. Interactive docs are at `/docs`.
 
 The default `GEMINI_MODEL` is `gemini-3.5-flash-lite`, Google's stable fast, free-tier-eligible model. You can override it in `.env` without changing application code.
 
