@@ -7,6 +7,7 @@ from app.services.recommendations import (
     RecommendationProviderError,
     RecommendationService,
     RecommendationUnavailableError,
+    RobotDispatchError,
 )
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
@@ -20,6 +21,8 @@ def _run(request: RecommendationRequest, source: str, send_to_robot: bool, servi
     except RecommendationProviderError as error:
         raise HTTPException(status_code=502, detail=str(error)) from None
     except InvalidRecommendationError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from None
+    except RobotDispatchError as error:
         raise HTTPException(status_code=502, detail=str(error)) from None
 
 
