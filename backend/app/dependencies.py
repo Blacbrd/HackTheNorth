@@ -6,6 +6,7 @@ from app.clients.robot import RobotClient
 from app.core.config import get_settings
 from app.repositories.storage import StorageRepository
 from app.services.recommendations import RecommendationService
+from app.services.robot_jobs import RobotJobService
 from app.services.transcriptions import TranscriptionService
 
 
@@ -15,10 +16,15 @@ def get_storage_repository() -> StorageRepository:
 
 
 @lru_cache
+def get_robot_job_service() -> RobotJobService:
+    return RobotJobService()
+
+
+@lru_cache
 def get_recommendation_service() -> RecommendationService:
     settings = get_settings()
     gemini = GeminiClient(settings.gemini_api_key, settings.gemini_model) if settings.gemini_api_key else None
-    return RecommendationService(get_storage_repository(), gemini, RobotClient())
+    return RecommendationService(get_storage_repository(), gemini, RobotClient(), get_robot_job_service())
 
 
 @lru_cache

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -99,6 +100,25 @@ def test_transcription_returns_plain_text_and_validates_uploads(tmp_path: Path) 
     app.dependency_overrides.clear()
 
 
+def test_transcription_falls_back_to_the_filename_when_the_part_is_unlabelled() -> None:
+    """The native uploaders can send octet-stream, or no type at all, for a
+    recording the browser labels audio/m4a."""
+    app.dependency_overrides[get_transcription_service] = lambda: TranscriptionService(FakeGemini(), 10)
+    with TestClient(app) as client:
+        octet_stream = client.post(
+            "/api/transcriptions",
+            files={"audio": ("request.m4a", b"audio", "application/octet-stream")},
+        )
+        # A filename that says nothing useful still has to be rejected.
+        unknown = client.post(
+            "/api/transcriptions",
+            files={"audio": ("request.bin", b"audio", "application/octet-stream")},
+        )
+    assert octet_stream.json() == {"text": "I need something gluten free"}
+    assert unknown.status_code == 415
+    app.dependency_overrides.clear()
+
+
 def test_transcription_maps_missing_key_and_provider_errors(tmp_path: Path) -> None:
     audio = {"audio": ("request.m4a", b"audio", "audio/m4a")}
     app.dependency_overrides[get_transcription_service] = lambda: TranscriptionService(None, 10)
@@ -111,4 +131,24 @@ def test_transcription_maps_missing_key_and_provider_errors(tmp_path: Path) -> N
 
     assert unavailable.status_code == 503
     assert provider_failure.status_code == 502
+    app.dependency_overrides.clear()
+
+
+def test_shelves_can_be_created_and_deleted(tmp_path: Path) -> None:
+    storage = tmp_path / "storage.json"
+    storage.write_text(json.dumps({"1": ["rice"], "2": []}), encoding="utf-8")
+    app.dependency_overrides[get_storage_repository] = lambda: StorageRepository(storage)
+    with TestClient(app) as client:
+        appended = client.post("/api/shelves")
+        explicit = client.post("/api/shelves", json={"shelf_number": 9})
+        clash = client.post("/api/shelves", json={"shelf_number": 1})
+        remaining = client.delete("/api/shelves/2")
+        missing = client.delete("/api/shelves/404")
+    # No number given, so it lands after the highest in use.
+    assert appended.status_code == 201
+    assert appended.json() == {"shelf_number": 3, "items": []}
+    assert explicit.json() == {"shelf_number": 9, "items": []}
+    assert clash.status_code == 409
+    assert [shelf["shelf_number"] for shelf in remaining.json()["shelves"]] == [1, 3, 9]
+    assert missing.status_code == 404
     app.dependency_overrides.clear()

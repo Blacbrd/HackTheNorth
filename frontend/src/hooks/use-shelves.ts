@@ -40,8 +40,8 @@ export function useShelves() {
     }, 0);
     return () => clearTimeout(timer);
   }, [refresh]);
-  const addItem = async (shelfNumber: number, item: string) => {
-    const shelf = await shelvesApi.addItem(shelfNumber, item);
+  const addItem = async (shelfNumber: number, item: string, quantity = 1) => {
+    const shelf = await shelvesApi.addItem(shelfNumber, item, quantity);
     dataRevision.current += 1;
     setShelves((all) =>
       all.map((entry) => (entry.shelf_number === shelfNumber ? shelf : entry)),
@@ -54,5 +54,27 @@ export function useShelves() {
       all.map((entry) => (entry.shelf_number === shelfNumber ? shelf : entry)),
     );
   };
-  return { shelves, loading, error, refresh, addItem, removeItem };
+  const addShelf = async () => {
+    const shelf = await shelvesApi.create();
+    dataRevision.current += 1;
+    setShelves((all) =>
+      [...all, shelf].sort((a, b) => a.shelf_number - b.shelf_number),
+    );
+    return shelf;
+  };
+  const removeShelf = async (shelfNumber: number) => {
+    const remaining = await shelvesApi.remove(shelfNumber);
+    dataRevision.current += 1;
+    setShelves(remaining);
+  };
+  return {
+    shelves,
+    loading,
+    error,
+    refresh,
+    addItem,
+    removeItem,
+    addShelf,
+    removeShelf,
+  };
 }

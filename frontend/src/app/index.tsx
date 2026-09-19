@@ -12,280 +12,370 @@ import {
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AppButton } from "@/components/app-button";
-import { ShelfCard } from "@/components/shelf-card";
+import { SearchHits } from "@/components/search-hits";
+import { Hex, NotchedSurface } from "@/components/shapes";
+import { ShelfList } from "@/components/shelf-list";
 import { ShelfSheet } from "@/components/shelf-sheet";
+import {
+  AddButton,
+  Card,
+  EmptyState,
+  ErrorPanel,
+  FilterPills,
+  Kicker,
+  SectionHeading,
+  Sub,
+  Title,
+  layout,
+} from "@/components/ui";
+import { AppButton } from "@/components/app-button";
+import { useRobotJob } from "@/hooks/use-robot-job";
 import { useShelves } from "@/hooks/use-shelves";
-import { colors, radius } from "@/theme/tokens";
+import { findItems, greeting, isLowStock, titleCase } from "@/lib/items";
+import { usePressed } from "@/lib/use-pressed";
+import { useTheme } from "@/theme/theme-context";
+import { radius, spacing, usePalette } from "@/theme/tokens";
+
+type Filter = "all" | "low" | "empty";
 
 export default function ShelvesScreen() {
-  const { shelves, loading, error, refresh, addItem, removeItem } =
-    useShelves();
+  const palette = usePalette();
+  const theme = useTheme();
+  const themeToggle = usePressed();
+  const {
+    shelves,
+    loading,
+    error,
+    refresh,
+    addItem,
+    removeItem,
+    addShelf,
+    removeShelf,
+  } = useShelves();
+  const [shelfError, setShelfError] = useState<string | null>(null);
+  const [addingShelf, setAddingShelf] = useState(false);
+  const { job } = useRobotJob();
   const [query, setQuery] = useState("");
-  const [selectedShelfNumber, setSelectedShelfNumber] = useState<number | null>(
-    null,
-  );
-  const filtered = useMemo(
-    () =>
-      shelves.filter(
-        (shelf) =>
-          shelf.items.some((item) =>
-            item.toLowerCase().includes(query.trim().toLowerCase()),
-          ) || !query.trim(),
-      ),
-    [shelves, query],
-  );
+  const [filter, setFilter] = useState<Filter>("all");
+  const [openShelf, setOpenShelf] = useState<number | null>(null);
+
+  const hits = useMemo(() => findItems(shelves, query), [shelves, query]);
   const selected =
-    shelves.find((shelf) => shelf.shelf_number === selectedShelfNumber) ?? null;
+    shelves.find((shelf) => shelf.shelf_number === openShelf) ?? null;
+  const searching = query.trim().length > 0;
+  const robotBusy = Boolean(job?.active || job?.failure);
+
+  const counts = useMemo(
+    () => ({
+      all: shelves.length,
+      low: shelves.filter(isLowStock).length,
+      empty: shelves.filter((shelf) => !shelf.items.length).length,
+    }),
+    [shelves],
+  );
+
+  const visible = useMemo(() => {
+    if (filter === "low") return shelves.filter(isLowStock);
+    if (filter === "empty") return shelves.filter((shelf) => !shelf.items.length);
+    return shelves;
+  }, [shelves, filter]);
+
+  const nextShelfNumber =
+    shelves.reduce((highest, shelf) => Math.max(highest, shelf.shelf_number), 0) + 1;
+
+  const createShelf = async () => {
+    setAddingShelf(true);
+    setShelfError(null);
+    try {
+      const shelf = await addShelf();
+      setOpenShelf(shelf.shelf_number);
+    } catch (cause) {
+      setShelfError(
+        cause instanceof Error ? cause.message : "Could not add a shelf.",
+      );
+    } finally {
+      setAddingShelf(false);
+    }
+  };
+
+  const deleteShelf = async (shelfNumber: number) => {
+    setShelfError(null);
+    try {
+      await removeShelf(shelfNumber);
+      setOpenShelf(null);
+    } catch (cause) {
+      setShelfError(
+        cause instanceof Error ? cause.message : "Could not remove that shelf.",
+      );
+    }
+  };
+
   return (
-    <SafeAreaView className="flex-1 bg-canvas" style={styles.safe}>
+    <SafeAreaView
+      edges={["top", "left", "right"]}
+      style={[layout.screen, { backgroundColor: palette.bg }]}
+    >
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={layout.page}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             refreshing={loading}
             onRefresh={refresh}
-            tintColor={colors.action}
+            tintColor={palette.accent}
           />
         }
       >
-        <View
-          className="flex-row items-start justify-between"
-          style={styles.header}
-        >
+        <View style={styles.header}>
           <View style={styles.headerCopy}>
-            <Text
-              className="text-action text-xs font-extrabold tracking-widest"
-              style={styles.kicker}
-            >
-              HAMPY · INVENTORY
-            </Text>
-            <Text
-              className="text-ink text-3xl font-extrabold"
-              style={styles.title}
-            >
-              Good morning, volunteer.
-            </Text>
-            <Text className="text-muted text-base" style={styles.subtitle}>
-              Keep shelves current so the robot can help quickly.
-            </Text>
+            <Kicker>Hampy · Inventory</Kicker>
+            <Title>{greeting()}, volunteer.</Title>
+            <Sub>Keep shelves current so the robot can help quickly.</Sub>
           </View>
-          <View className="bg-surface-muted rounded-full" style={styles.mark}>
-            <MaterialCommunityIcons
-              name="food-apple-outline"
-              size={27}
-              color={colors.action}
-            />
-          </View>
+          {/* The mark doubles as the theme switch. */}
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: theme.scheme === "dark" }}
+            accessibilityLabel={
+              theme.scheme === "dark"
+                ? "Switch to the light theme"
+                : "Switch to the dark theme"
+            }
+            onPress={theme.toggle}
+            {...themeToggle.pressHandlers}
+            hitSlop={8}
+            style={[themeToggle.pressed && styles.markPressed]}
+          >
+            <Hex size={46} color={palette.olive}>
+              <MaterialCommunityIcons
+                name="food-apple-outline"
+                size={22}
+                color={palette.onDark}
+              />
+            </Hex>
+          </Pressable>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Ask Hampy to choose an item"
-          onPress={() => router.push("/ask")}
-          className="bg-surface border border-line rounded-card flex-row items-center p-3.5 gap-3 active:scale-[0.99]"
+
+        {/* The hero carries the whole reason the app exists, so it gets the
+            weight: a solid olive block and the only orange button on screen. */}
+        <NotchedSurface
+          color={palette.heroBg}
+          cornerRadius={0}
+          style={styles.hero}
         >
-          <View className="bg-action rounded-full" style={styles.askIcon}>
-            <MaterialCommunityIcons
-              name="robot-outline"
-              size={25}
-              color={colors.surface}
-            />
+          <View style={styles.heroTop}>
+            <Hex size={58} color={palette.mustard}>
+              <MaterialCommunityIcons
+                name={job?.failure ? "alert-outline" : "robot-outline"}
+                size={28}
+                color={palette.onMustard}
+              />
+            </Hex>
+            <View style={styles.heroText}>
+              <Text style={[styles.heroTitle, { color: palette.onDark }]}>
+                {job?.failure
+                  ? "The robot needs you"
+                  : job?.active
+                    ? "Fetching your item"
+                    : "Ask Hampy for an item"}
+              </Text>
+              <Text style={[styles.heroSub, { color: palette.onDark }]}>
+                {robotBusy && job?.item
+                  ? `${titleCase(job.item)} · shelf ${job.shelf_number}`
+                  : robotBusy
+                    ? "Tap to follow its progress"
+                    : "Describe what you need — the robot fetches one that fits"}
+              </Text>
+            </View>
           </View>
-          <View style={styles.askText}>
-            <Text className="text-ink font-extrabold" style={styles.askTitle}>
-              Ask Hampy
-            </Text>
-            <Text className="text-muted" style={styles.askBody}>
-              Find the best item for a request
-            </Text>
-          </View>
-          <MaterialCommunityIcons
-            name="arrow-right"
-            size={21}
-            color={colors.action}
+          <AppButton
+            label={robotBusy ? "Follow the robot" : "Ask Hampy"}
+            onPress={() => router.push(robotBusy ? "/robot" : "/ask")}
+            chevrons
+            style={styles.heroCta}
           />
-        </Pressable>
-        <Text className="text-ink font-extrabold" style={styles.sectionTitle}>
-          Shelves
-        </Text>
+        </NotchedSurface>
+
+        {!searching && shelves.length > 0 ? (
+          <FilterPills<Filter>
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { key: "all", label: "All shelves", count: counts.all },
+              { key: "low", label: "Low stock", count: counts.low },
+              { key: "empty", label: "Empty", count: counts.empty },
+            ]}
+          />
+        ) : null}
+
         <View
-          className="bg-surface border border-line rounded-field flex-row items-center"
-          style={styles.search}
+          style={[
+            styles.search,
+            { backgroundColor: palette.surface, borderColor: palette.line },
+          ]}
         >
           <MaterialCommunityIcons
             name="magnify"
-            size={21}
-            color={colors.muted}
+            size={20}
+            color={palette.muted}
           />
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search items…"
-            placeholderTextColor={colors.muted}
-            style={styles.searchInput}
+            placeholder="Search items across every shelf"
+            placeholderTextColor={palette.muted}
+            style={[styles.searchInput, { color: palette.ink }]}
             accessibilityLabel="Search inventory items"
+            autoCapitalize="none"
             autoCorrect={false}
           />
-        </View>
-        {loading && !shelves.length ? (
-          <View style={styles.skeletons}>
-            {[1, 2, 3].map((number) => (
-              <View
-                className="bg-surface-muted rounded-card"
-                key={number}
-                style={styles.skeleton}
-              />
-            ))}
-          </View>
-        ) : error ? (
-          <View style={styles.state}>
-            <Text style={styles.stateTitle}>Couldn’t load shelves</Text>
-            <Text style={styles.stateBody}>{error}</Text>
-            <AppButton label="Retry" onPress={refresh} />
-          </View>
-        ) : !shelves.length ? (
-          <View style={styles.state}>
-            <Text style={styles.stateTitle}>No shelves yet</Text>
-            <Text style={styles.stateBody}>
-              Inventory will appear here when the storage file has shelves.
-            </Text>
-          </View>
-        ) : !filtered.length ? (
-          <View style={styles.state}>
-            <Text style={styles.stateTitle}>No matching items</Text>
-            <Text style={styles.stateBody}>
-              Try a different item name or clear the search.
-            </Text>
-            <AppButton
-              label="Clear Search"
-              variant="secondary"
+          {searching ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
               onPress={() => setQuery("")}
-            />
-          </View>
-        ) : (
-          <View style={styles.list}>
-            {filtered.map((shelf) => (
-              <ShelfCard
-                key={shelf.shelf_number}
-                shelf={shelf}
-                onPress={() => setSelectedShelfNumber(shelf.shelf_number)}
+              hitSlop={8}
+            >
+              <MaterialCommunityIcons
+                name="close"
+                size={19}
+                color={palette.muted}
               />
+            </Pressable>
+          ) : null}
+        </View>
+
+        {error ? (
+          <>
+            <ErrorPanel title="Couldn’t load shelves" body={error} />
+            <AppButton label="Retry" onPress={refresh} variant="ghost" />
+          </>
+        ) : loading && !shelves.length ? (
+          <View style={styles.list}>
+            {[1, 2, 3].map((key) => (
+              <Card key={key} style={styles.skeleton}>
+                <View
+                  style={[styles.bone, { backgroundColor: palette.sand, width: "30%" }]}
+                />
+                <View
+                  style={[styles.bone, { backgroundColor: palette.sand, width: "82%" }]}
+                />
+                <View
+                  style={[styles.bone, { backgroundColor: palette.sand, width: "58%" }]}
+                />
+              </Card>
             ))}
           </View>
+        ) : searching ? (
+          <SearchHits hits={hits} query={query} onOpenShelf={setOpenShelf} />
+        ) : !shelves.length ? (
+          <EmptyState
+            icon="package-variant-closed"
+            title="No shelves yet"
+            body="Add the first shelf, then list what is on it so the robot can reach it."
+            action={
+              <AppButton
+                label="Add a shelf"
+                onPress={createShelf}
+                variant="olive"
+                disabled={addingShelf}
+                style={{ marginTop: 16, minWidth: 220 }}
+                icon={
+                  <MaterialCommunityIcons
+                    name="plus"
+                    size={20}
+                    color={palette.onDark}
+                  />
+                }
+              />
+            }
+          />
+        ) : !visible.length ? (
+          <EmptyState
+            icon={filter === "empty" ? "package-variant-closed" : "check-circle-outline"}
+            title={filter === "empty" ? "No empty shelves" : "Nothing running low"}
+            body={
+              filter === "empty"
+                ? "Every shelf has stock the robot can reach."
+                : "All shelves are well stocked right now."
+            }
+          />
+        ) : (
+          <View style={styles.listBlock}>
+            <View style={styles.listHeader}>
+              <SectionHeading>Shelves</SectionHeading>
+              <AddButton
+                label={`Add shelf ${nextShelfNumber}`}
+                onPress={createShelf}
+                disabled={addingShelf}
+              />
+            </View>
+            <ShelfList shelves={visible} onOpenShelf={setOpenShelf} />
+          </View>
         )}
-        {loading && shelves.length > 0 && (
-          <ActivityIndicator color={colors.action} />
-        )}
+
+        {shelfError ? (
+          <ErrorPanel title="Couldn’t change the shelves" body={shelfError} />
+        ) : null}
+
+
+
+        {loading && shelves.length > 0 ? (
+          <ActivityIndicator color={palette.accent} />
+        ) : null}
       </ScrollView>
+
       <ShelfSheet
         key={selected?.shelf_number ?? "closed"}
         shelf={selected}
-        onClose={() => setSelectedShelfNumber(null)}
-        onAdd={async (item) => {
-          if (!selected) return;
-          await addItem(selected.shelf_number, item);
+        onClose={() => setOpenShelf(null)}
+        onAdd={async (item, quantity) => {
+          if (selected) await addItem(selected.shelf_number, item, quantity);
         }}
         onRemove={async (item) => {
-          if (!selected) return;
-          await removeItem(selected.shelf_number, item);
+          if (selected) await removeItem(selected.shelf_number, item);
         }}
+        onDeleteShelf={
+          selected ? () => deleteShelf(selected.shelf_number) : undefined
+        }
       />
     </SafeAreaView>
   );
 }
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
-  content: {
-    padding: 20,
-    paddingBottom: 36,
-    width: "100%",
-    maxWidth: 680,
-    alignSelf: "center",
-    gap: 18,
-  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginTop: 5,
+    gap: 12,
   },
-  headerCopy: { flex: 1, minWidth: 0, paddingRight: 12 },
-  kicker: {
-    color: colors.action,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1,
-  },
-  title: {
-    color: colors.ink,
-    fontSize: 30,
-    fontWeight: "800",
-    lineHeight: 36,
-    marginTop: 5,
-  },
-  subtitle: {
-    color: colors.muted,
-    fontSize: 16,
-    lineHeight: 23,
-    marginTop: 5,
-    maxWidth: 290,
-  },
-  mark: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  askIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: colors.action,
-  },
-  askText: { flex: 1 },
-  askTitle: { color: colors.ink, fontSize: 17, fontWeight: "800" },
-  askBody: { color: colors.muted, fontSize: 14, marginTop: 2 },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 21,
-    fontWeight: "800",
-    marginTop: 5,
-  },
+  headerCopy: { flex: 1, minWidth: 0 },
+  markPressed: { transform: [{ scale: 0.92 }], opacity: 0.85 },
+  hero: { padding: 20 },
+  heroTop: { flexDirection: "row", alignItems: "center", gap: 14 },
+  heroText: { flex: 1, minWidth: 0 },
+  heroTitle: { fontSize: 18, fontWeight: "800", letterSpacing: -0.2 },
+  heroSub: { fontSize: 13.5, lineHeight: 18, marginTop: 2, opacity: 0.85 },
+  heroCta: { marginTop: 16 },
   search: {
-    minHeight: 50,
     flexDirection: "row",
     alignItems: "center",
-    gap: 9,
-    borderRadius: radius.field,
+    gap: 10,
+    height: spacing.touch,
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
-    paddingHorizontal: 13,
+    borderRadius: radius.field,
+    paddingHorizontal: 14,
   },
-  searchInput: { color: colors.ink, flex: 1, fontSize: 16, minHeight: 48 },
+  searchInput: { flex: 1, fontSize: 16, minHeight: spacing.touch },
   list: { gap: 10 },
-  skeletons: { gap: 10 },
-  skeleton: {
-    height: 130,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.card,
+  listBlock: { gap: 10 },
+  listHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
   },
-  state: {
-    gap: 9,
-    borderRadius: radius.card,
-    backgroundColor: colors.surfaceMuted,
-    padding: 20,
-    alignItems: "flex-start",
-  },
-  stateTitle: { color: colors.ink, fontSize: 18, fontWeight: "800" },
-  stateBody: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 21,
-    marginBottom: 4,
-  },
+  skeleton: { gap: 10 },
+  bone: { height: 12, borderRadius: 6 },
 });

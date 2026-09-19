@@ -1,1 +1,0 @@
-"""Robot sketch API package."""

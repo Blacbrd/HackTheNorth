@@ -1,12 +1,36 @@
 {
-  "background": "#F7F9F5",
-  "surface": "#FFFFFF",
-  "surfaceMuted": "#EAF1E8",
-  "action": "#1D5C3B",
-  "actionPressed": "#16462D",
-  "ink": "#16231A",
-  "muted": "#5B6A5D",
-  "line": "#D5E0D4",
-  "danger": "#A43D2E",
-  "dangerSoft": "#F9E9E6"
+  "bg": "#F3EEE1",
+  "surface": "#FCF9F1",
+  "sand": "#EBE4D0",
+  "sandDeep": "#E1D8BF",
+
+  "olive": "#4C5A2A",
+  "olivePressed": "#3B471F",
+  "oliveDeep": "#333E1A",
+  "oliveTint": "#DDE3C6",
+  "accent": "#4C5A2A",
+
+  "mustard": "#C69026",
+  "mustardSoft": "#F0E2B8",
+  "mustardInk": "#5A4410",
+  "onMustard": "#2E2308",
+
+  "orange": "#BB5024",
+  "orangePressed": "#9E4019",
+  "onOrange": "#FDF4E8",
+  "orangeTint": "#F4E2D9",
+
+  "ink": "#22200F",
+  "inkPressed": "#3A3722",
+  "muted": "#726B54",
+  "line": "#DBD3BC",
+  "onDark": "#FBF7EC",
+
+  "danger": "#B23D2A",
+  "dangerSoft": "#F6E4DD",
+  "dangerLine": "#E3C4BA",
+
+  "heroBg": "#3F4B22",
+  "scrim": "rgba(34,32,15,0.44)",
+  "cameraBackground": "#14170D"
 }

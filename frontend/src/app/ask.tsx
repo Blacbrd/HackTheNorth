@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,18 +15,31 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppButton } from "@/components/app-button";
-import { RobotCamera } from "@/components/robot-camera";
+import { Hex, NotchedSurface } from "@/components/shapes";
+import { Card, ErrorPanel, Help, Kicker, Title, layout } from "@/components/ui";
 import { useVoiceRequest } from "@/hooks/use-voice-request";
+import { usePressed } from "@/lib/use-pressed";
 import { recommendationApi } from "@/services/api";
-import type { Recommendation } from "@/types/api";
-import { colors, radius } from "@/theme/tokens";
+import { radius, usePalette } from "@/theme/tokens";
+
+const MAX_LENGTH = 700;
+const MIC_SIZE = 118;
 
 export default function AskScreen() {
+  const palette = usePalette();
+  const mic = usePressed();
   const [request, setRequest] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<Recommendation | null>(null);
-  const voice = useVoiceRequest((text) => setRequest(text));
+  const voice = useVoiceRequest((text) =>
+    setRequest((current) => (current ? `${current} ${text}` : text)),
+  );
+
+  const listening = voice.status === "recording";
+  const transcribing = voice.status === "transcribing";
+  const changing = voice.status === "starting" || voice.status === "stopping";
+  const locked = busy || transcribing || changing;
+
   const submit = async () => {
     if (!request.trim()) {
       setError("Describe what you need so Hampy can choose an item.");
@@ -31,338 +47,251 @@ export default function AskScreen() {
     }
     setBusy(true);
     setError(null);
-    setResult(null);
     try {
-      setResult(await recommendationApi.ask(request.trim()));
+      await recommendationApi.ask(request.trim());
+      setRequest("");
+      router.push("/robot");
     } catch (cause) {
       setError(
-        cause instanceof Error
-          ? cause.message
-          : "Hampy could not choose an item.",
+        cause instanceof Error ? cause.message : "Hampy could not choose an item.",
       );
     } finally {
       setBusy(false);
     }
   };
-  const listening = voice.status === "recording";
-  const transcribing = voice.status === "transcribing";
-  const changingRecording =
-    voice.status === "starting" || voice.status === "stopping";
+
   return (
-    <SafeAreaView className="flex-1 bg-canvas" style={styles.safe}>
+    <SafeAreaView
+      edges={["top", "left", "right"]}
+      style={[layout.screen, { backgroundColor: palette.bg }]}
+    >
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={layout.page}
         keyboardShouldPersistTaps="handled"
       >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back to shelves"
-          onPress={() => router.back()}
-          className="flex-row items-center"
-          style={styles.back}
-        >
-          <MaterialCommunityIcons
-            name="arrow-left"
-            size={21}
-            color={colors.action}
-          />
-          <Text className="text-action font-bold" style={styles.backText}>
-            Shelves
-          </Text>
-        </Pressable>
         <View>
-          <Text
-            className="text-action text-xs font-extrabold tracking-widest"
-            style={styles.kicker}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back to shelves"
+            onPress={() => router.push("/")}
+            style={styles.back}
+            hitSlop={6}
           >
-            ASK HAMPY
-          </Text>
-          <Text
-            className="text-ink text-3xl font-extrabold"
-            style={styles.title}
-          >
-            What should the robot bring?
-          </Text>
-          <Text className="text-muted text-base" style={styles.subtitle}>
-            Describe the need. Hampy checks the live shelves and selects an
-            available match.
-          </Text>
-        </View>
-        <View
-          className="bg-surface border border-line rounded-card"
-          style={styles.form}
-        >
-          <Text className="text-ink font-extrabold" style={styles.label}>
-            Request
-          </Text>
-          <TextInput
-            style={styles.textarea}
-            value={request}
-            onChangeText={setRequest}
-            multiline
-            textAlignVertical="top"
-            placeholder="For example: I need a gluten-free dinner option…"
-            placeholderTextColor={colors.muted}
-            accessibilityLabel="Request for the robot"
-            editable={!busy && !transcribing && !changingRecording}
-            maxLength={700}
-          />
-          <View style={styles.formFooter}>
-            <Text style={styles.help}>
-              {transcribing
-                ? "Transcribing your recording…"
-                : changingRecording
-                  ? "Preparing the microphone…"
-                  : listening
-                    ? "Recording — tap stop when you’re done."
-                    : "Type a request or record one."}
+            <MaterialCommunityIcons
+              name="arrow-left"
+              size={19}
+              color={palette.accent}
+            />
+            <Text style={[styles.backText, { color: palette.accent }]}>
+              Shelves
             </Text>
+          </Pressable>
+          <Kicker>Ask Hampy</Kicker>
+          <Title>What should the robot bring?</Title>
+        </View>
+
+        {/* Voice leads: a volunteer holding a crate can speak but not type. */}
+        <NotchedSurface
+          color={palette.oliveTint}
+          borderColor={palette.line}
+          style={styles.askCard}
+        >
+          <View style={styles.micWrap}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={
-                listening ? "Stop recording" : "Record a request"
+                listening ? "Stop recording" : "Record your request"
               }
+              accessibilityState={{ busy: listening }}
               onPress={voice.toggle}
-              disabled={busy || transcribing || changingRecording}
-              className={
-                listening
-                  ? "bg-danger rounded-full w-12 h-12 items-center justify-center active:scale-95 disabled:opacity-50"
-                  : "bg-surface-muted rounded-full w-12 h-12 items-center justify-center active:scale-95 disabled:opacity-50"
-              }
+              disabled={locked && !listening}
+              {...mic.pressHandlers}
+              style={[
+                styles.micHit,
+                { opacity: locked && !listening ? 0.5 : 1 },
+                mic.pressed && { transform: [{ scale: 0.97 }] },
+              ]}
             >
-              <MaterialCommunityIcons
-                name={listening ? "stop" : "microphone-outline"}
-                size={22}
-                color={listening ? colors.surface : colors.action}
-              />
+              {listening ? <MicPulse color={palette.orange} /> : null}
+              <Hex
+                size={MIC_SIZE}
+                color={listening ? palette.orange : palette.olive}
+              >
+                <MaterialCommunityIcons
+                  name={listening ? "stop" : "microphone-outline"}
+                  size={42}
+                  color={listening ? palette.onOrange : palette.onDark}
+                />
+              </Hex>
             </Pressable>
-          </View>
-        </View>
-        {(error || voice.error) && (
-          <View
-            accessibilityLiveRegion="polite"
-            className="bg-danger-soft rounded-field flex-row"
-            style={styles.error}
-          >
-            <MaterialCommunityIcons
-              name="alert-circle-outline"
-              size={19}
-              color={colors.danger}
-            />
-            <Text style={styles.errorText}>{error ?? voice.error}</Text>
-          </View>
-        )}
-        <AppButton
-          label={busy ? "Choosing the Best Item…" : "Ask Hampy"}
-          onPress={submit}
-          disabled={busy || transcribing || changingRecording}
-          icon={
-            busy ? (
-              <ActivityIndicator color={colors.surface} />
+
+            {listening ? (
+              <View style={styles.recRow}>
+                <View style={[styles.recDot, { backgroundColor: palette.orange }]} />
+                <Text style={[styles.recText, { color: palette.orange }]}>
+                  Listening… tap to stop
+                </Text>
+              </View>
             ) : (
-              <MaterialCommunityIcons
-                name="robot-outline"
-                size={20}
-                color={colors.surface}
-              />
-            )
-          }
-        />
-        {busy && (
+              <Text style={[styles.micCaption, { color: palette.ink }]}>
+                {transcribing
+                  ? "Transcribing…"
+                  : changing
+                    ? "Preparing the microphone…"
+                    : "Tap and speak"}
+              </Text>
+            )}
+            <Text style={[styles.micSub, { color: palette.muted }]}>
+              {listening
+                ? "Your words are transcribed into the box below."
+                : "Say what you need — “something vegetarian”, “a gluten-free dinner”."}
+            </Text>
+          </View>
+
           <View
-            accessibilityLiveRegion="polite"
-            className="bg-surface-muted rounded-card flex-row"
-            style={styles.processing}
+            style={[
+              styles.inputBox,
+              { backgroundColor: palette.surface, borderColor: palette.line },
+            ]}
           >
-            <View className="bg-surface rounded-full" style={styles.pulse}>
-              <MaterialCommunityIcons
-                name="robot-outline"
-                size={26}
-                color={colors.action}
-              />
-            </View>
-            <View>
-              <Text style={styles.processingTitle}>
+            <TextInput
+              value={request}
+              onChangeText={setRequest}
+              multiline
+              textAlignVertical="top"
+              placeholder="Or type the item or need in plain words"
+              placeholderTextColor={palette.muted}
+              style={[styles.textarea, { color: palette.ink }]}
+              accessibilityLabel="Request for the robot"
+              editable={!locked}
+              maxLength={MAX_LENGTH}
+            />
+            <Help>
+              {request.length}/{MAX_LENGTH} · the robot only returns an item that
+              is actually on a shelf
+            </Help>
+          </View>
+        </NotchedSurface>
+
+        {error || voice.error ? (
+          <ErrorPanel
+            title="That didn’t work"
+            body={error ?? voice.error ?? undefined}
+          />
+        ) : null}
+
+        {busy ? (
+          <Card style={styles.thinking}>
+            <ActivityIndicator color={palette.accent} />
+            <View style={styles.thinkingText}>
+              <Text style={[styles.thinkingTitle, { color: palette.ink }]}>
                 Choosing the best item…
               </Text>
-              <Text style={styles.processingBody}>
-                Checking dietary fit and what’s on the shelves.
-              </Text>
+              <Help>Matching your request to what is on the shelves</Help>
             </View>
-          </View>
-        )}
-        {result && (
-          <View
-            accessibilityLiveRegion="polite"
-            className="bg-surface border border-line rounded-card"
-            style={styles.result}
-          >
-            <View style={styles.resultHeading}>
-              <View className="bg-action rounded-full" style={styles.check}>
-                <MaterialCommunityIcons
-                  name="check"
-                  size={19}
-                  color={colors.surface}
-                />
-              </View>
-              <View style={styles.resultCopy}>
-                <Text style={styles.resultKicker}>ROBOT TARGET READY</Text>
-                <Text style={styles.resultTitle}>
-                  Success! The robot will now retrieve the object.
-                </Text>
-                <Text style={styles.resultTarget}>
-                  Shelf {result.shelf_number} · {result.item}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.resultBody}>
-              Hampy sent this selection to the robot. Use the camera view below
-              to follow its route.
-            </Text>
-            <RobotCamera shelfNumber={result.shelf_number} item={result.item} />
-          </View>
-        )}
+          </Card>
+        ) : null}
+
+        <AppButton
+          label={busy ? "Choosing…" : "Ask Hampy"}
+          onPress={submit}
+          variant="ink"
+          disabled={locked}
+          chevrons={!busy}
+        />
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+/** The ring that expands out of the mic while it is listening. */
+function MicPulse({ color }: { color: string }) {
+  const [progress] = useState(() => new Animated.Value(0));
+  const [reduceMotion, setReduceMotion] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (alive) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion,
+    );
+    return () => {
+      alive = false;
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotion) return;
+    const loop = Animated.loop(
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 1600,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [progress, reduceMotion]);
+
+  if (reduceMotion) return null;
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFill,
+        styles.pulse,
+        {
+          opacity: progress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0.5, 0],
+          }),
+          transform: [
+            {
+              scale: progress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1, 1.4],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <Hex size={MIC_SIZE} color="none" stroke={color} strokeWidth={2} />
+    </Animated.View>
+  );
+}
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
-  content: {
-    width: "100%",
-    maxWidth: 680,
-    alignSelf: "center",
-    padding: 20,
-    paddingBottom: 38,
-    gap: 20,
+  back: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8 },
+  backText: { fontSize: 14, fontWeight: "800" },
+  askCard: { padding: 16, paddingTop: 26 },
+  micWrap: { alignItems: "center", gap: 13, paddingBottom: 18 },
+  micHit: { alignItems: "center", justifyContent: "center" },
+  pulse: { alignItems: "center", justifyContent: "center" },
+  micCaption: { fontSize: 16, fontWeight: "800" },
+  micSub: {
+    fontSize: 13.5,
+    textAlign: "center",
+    maxWidth: 260,
+    lineHeight: 19,
   },
-  back: {
-    height: 48,
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingRight: 10,
-  },
-  backText: { color: colors.action, fontSize: 16, fontWeight: "700" },
-  kicker: {
-    color: colors.action,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1,
-  },
-  title: {
-    color: colors.ink,
-    fontSize: 30,
-    lineHeight: 36,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  subtitle: {
-    color: colors.muted,
-    fontSize: 16,
-    lineHeight: 23,
-    marginTop: 7,
-    maxWidth: 540,
-  },
-  form: {
-    backgroundColor: colors.surface,
+  recRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  recDot: { width: 9, height: 9, borderRadius: 5 },
+  recText: { fontSize: 14, fontWeight: "800" },
+  inputBox: {
     borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.card,
-    padding: 16,
-  },
-  label: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-    marginBottom: 9,
-  },
-  textarea: {
-    minHeight: 130,
-    color: colors.ink,
-    fontSize: 16,
-    lineHeight: 23,
-    padding: 0,
-  },
-  formFooter: {
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    marginTop: 12,
-    paddingTop: 11,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  help: { color: colors.muted, flex: 1, fontSize: 13, lineHeight: 18 },
-  error: {
-    flexDirection: "row",
-    gap: 8,
-    padding: 12,
-    backgroundColor: colors.dangerSoft,
     borderRadius: radius.field,
-    alignItems: "flex-start",
+    padding: 14,
+    gap: 8,
   },
-  errorText: { color: colors.danger, fontSize: 14, lineHeight: 20, flex: 1 },
-  processing: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.card,
-    padding: 16,
-    gap: 13,
-    alignItems: "center",
-  },
-  pulse: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: colors.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  processingTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
-  processingBody: {
-    color: colors.muted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 2,
-    flexShrink: 1,
-  },
-  result: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: 16,
-    gap: 14,
-  },
-  resultHeading: { flexDirection: "row", alignItems: "center", gap: 10 },
-  resultCopy: { flex: 1, minWidth: 0 },
-  check: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: colors.action,
-  },
-  resultKicker: {
-    color: colors.action,
-    fontSize: 11,
-    letterSpacing: 0.8,
-    fontWeight: "800",
-  },
-  resultTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: "800",
-    marginTop: 2,
-  },
-  resultTarget: {
-    color: colors.action,
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 4,
-  },
-  resultBody: { color: colors.muted, fontSize: 14, lineHeight: 20 },
+  textarea: { minHeight: 84, fontSize: 16, lineHeight: 23, padding: 0 },
+  thinking: { flexDirection: "row", alignItems: "center", gap: 12 },
+  thinkingText: { flex: 1, minWidth: 0 },
+  thinkingTitle: { fontSize: 15, fontWeight: "800" },
 });
