@@ -34,6 +34,18 @@ def test_rejects_non_image_upload(client) -> None:
     assert response.json()["detail"] == "Upload an image file."
 
 
+def test_accepts_android_binary_content_type(client, png_bytes: bytes) -> None:
+    test_client, _ = client
+
+    response = test_client.post(
+        "/api/simplify",
+        files={"image": ("photo.jpg", png_bytes, "application/octet-stream")},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+
+
 def test_latest_result_is_missing_before_generation(client) -> None:
     test_client, _ = client
 

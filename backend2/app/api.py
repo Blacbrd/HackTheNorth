@@ -35,7 +35,12 @@ async def simplify_image(
     gemini: Annotated[GeminiImageService, Depends(get_gemini_service)],
     storage: Annotated[ImageStorage, Depends(get_image_storage)],
 ) -> Response:
-    if not image.content_type or not image.content_type.startswith("image/"):
+    supported_content_type = (
+        not image.content_type
+        or image.content_type.startswith("image/")
+        or image.content_type == "application/octet-stream"
+    )
+    if not supported_content_type:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload an image file.")
 
     upload = await image.read(settings.max_upload_bytes + 1)
