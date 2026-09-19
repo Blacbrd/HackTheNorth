@@ -12,7 +12,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#EAF1E8",
+        "backgroundColor": "#F3EEE1",
         "foregroundImage": "./assets/images/hampy-foreground.png"
       },
       "predictiveBackGestureEnabled": false
@@ -32,7 +32,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#EAF1E8",
+          "backgroundColor": "#F3EEE1",
           "image": "./assets/images/hampy-foreground.png",
           "imageWidth": 76
         }

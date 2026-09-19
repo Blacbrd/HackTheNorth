@@ -22,7 +22,7 @@ async def transcribe(
 ) -> TranscriptionResponse:
     try:
         upload = await audio.read(service.max_audio_upload_bytes + 1)
-        return await run_in_threadpool(service.transcribe, upload, audio.content_type)
+        return await run_in_threadpool(service.transcribe, upload, audio.content_type, audio.filename)
     except InvalidAudioUploadError as error:
         raise HTTPException(status_code=error.status_code, detail=error.detail) from None
     except TranscriptionUnavailableError as error:

@@ -1,4 +1,11 @@
 {
-  "1": ["mushroom", "peas", "banana"],
-  "2": ["pasta", "rice"]
+  "1": [
+    "mushroom",
+    "peas",
+    "banana"
+  ],
+  "2": [
+    "pasta",
+    "rice"
+  ]
 }

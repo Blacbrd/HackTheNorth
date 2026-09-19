@@ -13,6 +13,10 @@ class ItemNotFoundError(Exception):
     pass
 
 
+class ShelfAlreadyExistsError(Exception):
+    pass
+
+
 class StorageRepository:
     """Owns the small JSON store and replaces it atomically after every change."""
 
@@ -30,6 +34,28 @@ class StorageRepository:
         if shelf_number not in shelves:
             raise ShelfNotFoundError(shelf_number)
         return shelves[shelf_number]
+
+    def create_shelf(self, shelf_number: int | None = None) -> tuple[int, list[str]]:
+        """Add an empty shelf. Without a number, take the next one after the
+        highest in use, so the common case needs no decision from the caller."""
+        with self._mutation_lock:
+            shelves = self.list_shelves()
+            if shelf_number is None:
+                shelf_number = max(shelves, default=0) + 1
+            elif shelf_number in shelves:
+                raise ShelfAlreadyExistsError(shelf_number)
+            shelves[shelf_number] = []
+            self._write(shelves)
+            return shelf_number, shelves[shelf_number]
+
+    def delete_shelf(self, shelf_number: int) -> dict[int, list[str]]:
+        with self._mutation_lock:
+            shelves = self.list_shelves()
+            if shelf_number not in shelves:
+                raise ShelfNotFoundError(shelf_number)
+            del shelves[shelf_number]
+            self._write(shelves)
+            return shelves
 
     def add_item(self, shelf_number: int, item: str) -> list[str]:
         with self._mutation_lock:
@@ -75,7 +101,9 @@ class StorageRepository:
         descriptor, temporary_name = tempfile.mkstemp(prefix="storage-", suffix=".json", dir=self.path.parent)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as file:
-                json.dump({str(number): items for number, items in shelves.items()}, file, indent=2)
+                # Sorted so deleting and re-adding a shelf cannot leave the
+                # file in an order that reads as scrambled.
+                json.dump({str(number): shelves[number] for number in sorted(shelves)}, file, indent=2)
                 file.write("\n")
                 file.flush()
                 os.fsync(file.fileno())
