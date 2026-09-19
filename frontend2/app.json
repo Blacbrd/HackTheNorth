@@ -17,8 +17,7 @@
         {
           "photosPermission": "Allow Picture to Path to choose a photo."
         }
-      ],
-      "expo-status-bar"
+      ]
     ]
   }
 }

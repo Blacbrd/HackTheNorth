@@ -2,7 +2,7 @@
 
 An Expo TypeScript app for capturing or selecting an image, posting it to FastAPI, and presenting a simplified black-and-white drawing.
 
-The app targets Expo SDK 57, the current stable SDK used by this project.
+The app targets Expo SDK 57 for compatibility with the current iOS App Store version of Expo Go.
 
 ## Run
 
