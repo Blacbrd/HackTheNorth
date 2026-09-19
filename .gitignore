@@ -1,0 +1,9 @@
+# Local agent configuration and skills
+/.agents/
+/.codex/
+/AGENTS.md
+
+# Agent browser tooling and runtime artifacts
+/node_modules/
+/.playwright/
+/.playwright-cli/
