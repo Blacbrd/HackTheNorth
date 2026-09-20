@@ -1,0 +1,26 @@
+{
+  "left": {
+    "key_code": 123,
+    "label": "Left Button / Robot Turn Right"
+  },
+  "right": {
+    "key_code": 124,
+    "label": "Right Button / Robot Turn Left"
+  },
+  "top": {
+    "key_code": 126,
+    "label": "Up Button / Robot Backward"
+  },
+  "bottom": {
+    "key_code": 125,
+    "label": "Down Button / Robot Forward"
+  },
+  "center": {
+    "key_code": 49,
+    "label": "Six-Seven Gesture"
+  },
+  "home": {
+    "key_code": 36,
+    "label": "Thank You for Listening"
+  }
+}
