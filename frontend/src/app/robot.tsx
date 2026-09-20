@@ -5,7 +5,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AppButton } from "@/components/app-button";
 import { RobotCamera } from "@/components/robot-camera";
 import { Hex, NotchedSurface } from "@/components/shapes";
-import { STAGES, StageTracker, failureCopy } from "@/components/stage-tracker";
+import {
+  StageTracker,
+  failureCopy,
+  isArrived,
+} from "@/components/stage-tracker";
 import { EmptyState, Help, layout } from "@/components/ui";
 import { useRobotJob } from "@/hooks/use-robot-job";
 import { formatElapsed, titleCase } from "@/lib/items";
@@ -40,8 +44,14 @@ export default function RobotScreen() {
     );
   }
 
-  const arrived = !job.failure && job.stage_index >= STAGES.length - 1;
+  const arrived = isArrived(job);
   const failure = job.failure ? failureCopy(job.failure) : null;
+  const items = job.items.length > 0
+    ? job.items
+    : job.item !== null && job.shelf_number !== null
+      ? [{ item: job.item, shelf_number: job.shelf_number }]
+      : [];
+  const twoItems = job.two_item && items.length > 1;
 
   return (
     <SafeAreaView
@@ -83,14 +93,20 @@ export default function RobotScreen() {
         >
           <View style={styles.targetTag}>
             <Text style={[styles.targetTagText, { color: palette.onDark }]}>
-              SHELF {job.shelf_number ?? "—"}
+              {twoItems
+                ? `SHELF ${items[0].shelf_number} · SHELF ${items[1].shelf_number}`
+                : `SHELF ${job.shelf_number ?? "—"}`}
             </Text>
           </View>
           <Text
             numberOfLines={1}
             style={[styles.targetItem, { color: palette.onDark }]}
           >
-            {job.item ? titleCase(job.item) : "—"}
+            {twoItems
+              ? `${titleCase(items[0].item)} & ${titleCase(items[1].item)}`
+              : job.item
+                ? titleCase(job.item)
+                : "—"}
           </Text>
           {!failure && !arrived ? (
             <Text style={[styles.targetElapsed, { color: palette.onDark }]}>
@@ -152,15 +168,18 @@ export default function RobotScreen() {
                 />
               </Hex>
               <Text style={[styles.collectTitle, { color: palette.ink }]}>
-                Take {job.item} from the counter
+                {twoItems
+                  ? `Take ${titleCase(items[0].item)} and ${titleCase(items[1].item)} from the counter`
+                  : `Take ${job.item} from the counter`}
               </Text>
               <Help>
-                Then remove it from shelf {job.shelf_number} if the count should
-                drop.
+                {twoItems
+                  ? `Then remove them from shelf ${items[0].shelf_number} and shelf ${items[1].shelf_number} if the counts should drop.`
+                  : `Then remove it from shelf ${job.shelf_number} if the count should drop.`}
               </Help>
             </View>
             <AppButton
-              label="Done — back to shelves"
+              label="Return back to shelves"
               variant="olive"
               onPress={async () => {
                 await clear();
@@ -180,8 +199,8 @@ export default function RobotScreen() {
             />
             <Text style={[styles.caveat, { color: palette.muted }]}>
               {job.simulated
-                ? "Stages advance on a server timer — the robot does not report its own progress yet, and recall only clears the job here."
-                : "Robot mode is on. Stages are still approximate because the robot process does not stream live progress back yet."}
+                ? "No robot is attached — this run is a rehearsal."
+                : "Stages come from the robot as it reports them."}
             </Text>
           </View>
         )}

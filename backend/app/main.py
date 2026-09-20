@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.routers import recommendations, robot, shelves, transcriptions
+from app.routers import camera, recommendations, robot, shelves, transcriptions
 
 settings = get_settings()
 app = FastAPI(title="Shelf Robot API", version="0.1.0")
@@ -18,6 +18,7 @@ app.include_router(shelves.router, prefix="/api")
 app.include_router(recommendations.router, prefix="/api")
 app.include_router(transcriptions.router, prefix="/api")
 app.include_router(robot.router, prefix="/api")
+app.include_router(camera.router, prefix="/api")
 
 
 @app.get("/health")

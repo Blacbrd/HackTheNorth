@@ -1,18 +1,28 @@
 export type Shelf = { shelf_number: number; items: string[] };
 export type ShelvesResponse = { shelves: Shelf[] };
+
+/** One item in a request, paired with the shelf it lives on. */
+export type RobotJobItem = { shelf_number: number; item: string };
+
 export type Recommendation = {
-  shelf_number: number;
-  item: string;
+  items: RobotJobItem[];
   source: "app" | "robot";
+  /** Mirrors items[0], kept for call sites that only care about one item. */
+  shelf_number: number | null;
+  item: string | null;
 };
 
-/** One stage of a fetch, in the order the robot works through them. */
+/**
+ * One stage of a fetch. The server sends only one of two ordered lists for a
+ * given job — single-item or two-item — never a mix of keys from both.
+ */
 export type RobotStage =
-  | "queued"
-  | "driving"
   | "picking"
-  | "returning"
-  | "arrived";
+  | "driving"
+  | "arrived"
+  | "queued"
+  | "dropping_first"
+  | "dropping_second";
 
 export type RobotFailure = "missing" | "blocked" | "fault";
 
@@ -20,11 +30,17 @@ export type RobotJob = {
   active: boolean;
   stage: RobotStage | null;
   stage_index: number;
+  /** The ordered stage keys for THIS job, as the server reports them. */
+  stages: RobotStage[];
   shelf_number: number | null;
   item: string | null;
+  /** Every item in the run; shelf_number/item above mirror items[0]. */
+  items: RobotJobItem[];
   elapsed_seconds: number;
   failure: RobotFailure | null;
-  /** True while stages advance on a server timer rather than robot telemetry. */
+  /** Whether this run is fetching two items rather than one. */
+  two_item: boolean;
+  /** True when no real robot is attached — not whether stages are timed. */
   simulated: boolean;
 };
 

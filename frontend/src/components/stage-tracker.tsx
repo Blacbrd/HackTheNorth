@@ -1,23 +1,40 @@
 import { StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { radius, usePalette } from "@/theme/tokens";
-import type { RobotFailure, RobotJob } from "@/types/api";
+import type { RobotFailure, RobotJob, RobotStage } from "@/types/api";
 
-type Stage = { key: string; title: string; note: string };
+/** Falls back to when the server predates `stages` or hasn't started the job. */
+const DEFAULT_STAGES: RobotStage[] = ["picking", "driving", "arrived"];
 
-export const STAGES: Stage[] = [
-  { key: "queued", title: "Request received", note: "Robot is queuing the job" },
-  { key: "driving", title: "Driving to the shelf", note: "On its way to shelf {n}" },
-  { key: "picking", title: "Picking {item}", note: "Lining up and lifting the item" },
-  { key: "returning", title: "Bringing it to you", note: "Heading back to the counter" },
-  { key: "arrived", title: "Ready to collect", note: "At the counter — take {item}" },
-];
+/** Copy for every stage key across both lists the server can send. */
+const STAGE_COPY: Record<RobotStage, { title: string; note: string }> = {
+  picking: { title: "Initial pick up", note: "Picking {item} up off the shelf" },
+  driving: { title: "Driving to shelf", note: "Carrying {item} to the drop-off" },
+  queued: { title: "Request received", note: "The robot is starting the job" },
+  dropping_first: {
+    title: "Dropping off first item",
+    note: "Taking the first item to its shelf",
+  },
+  dropping_second: {
+    title: "Dropping off second item",
+    note: "Taking the second item to its shelf",
+  },
+  arrived: { title: "Ready to collect", note: "Take {item} from the counter" },
+};
 
-/** Where a failure interrupts the run, so the tracker breaks at the right step. */
-export function failureStageIndex(failure: RobotFailure): number {
-  if (failure === "missing") return 2;
-  if (failure === "blocked") return 1;
-  return 3;
+/**
+ * The stage list for this job. The server sends exactly the keys the job will
+ * go through, but an older backend or a job that hasn't started yet can send
+ * an empty array — fall back to the single-item list so the tracker always
+ * has something to render.
+ */
+export function stageList(job: RobotJob): RobotStage[] {
+  return job.stages.length > 0 ? job.stages : DEFAULT_STAGES;
+}
+
+/** Whether the run has reached its last stage cleanly. */
+export function isArrived(job: RobotJob): boolean {
+  return !job.failure && job.stage_index >= stageList(job).length - 1;
 }
 
 export function failureCopy(failure: RobotFailure) {
@@ -46,13 +63,16 @@ export function failureCopy(failure: RobotFailure) {
  */
 export function StageTracker({ job }: { job: RobotJob }) {
   const palette = usePalette();
-  const failAt = job.failure ? failureStageIndex(job.failure) : -1;
-  const arrived = !job.failure && job.stage_index >= STAGES.length - 1;
+  const stages = stageList(job);
+  const arrived = isArrived(job);
 
   return (
     <View style={styles.track}>
-      {STAGES.map((stage, index) => {
-        const failedHere = failAt === index;
+      {stages.map((key, index) => {
+        const stage = STAGE_COPY[key];
+        // The server now reports a failure at the stage it actually happened
+        // in, so the failed step is just wherever stage_index points.
+        const failedHere = Boolean(job.failure) && index === job.stage_index;
         const done = !failedHere && (index < job.stage_index || arrived);
         const active = !job.failure && !arrived && index === job.stage_index;
         const dim = !done && !active && !failedHere;
@@ -80,7 +100,7 @@ export function StageTracker({ job }: { job: RobotJob }) {
               .replace("{n}", String(job.shelf_number ?? "?"));
 
         return (
-          <View key={stage.key} style={styles.step}>
+          <View key={key} style={styles.step}>
             <View style={styles.rail}>
               <View
                 style={[
@@ -104,7 +124,7 @@ export function StageTracker({ job }: { job: RobotJob }) {
                   <View style={[styles.pip, { backgroundColor: palette.mustard }]} />
                 ) : null}
               </View>
-              {index < STAGES.length - 1 ? (
+              {index < stages.length - 1 ? (
                 <View
                   style={[
                     styles.bar,

@@ -1,13 +1,14 @@
 """Tracks the one job the robot is doing, plus a short request history.
 
-The real robot reports nothing back yet: `RobotClient.send_pick_command` just
-prints. So the stage a caller sees here advances on a timer rather than on
-anything the hardware said, and every response carries `simulated: true` to say
-so out loud.
+Stages are driven by the robot process's stdout: `RobotClient` reads the
+workflow script's output line by line and calls `advance()` with whatever
+stage that line implies. Nothing in here invents progress on a timer any
+more -- if the robot process stalls, so does the stage reported here.
 
-Keeping that timer here rather than in the app still buys something real. Every
-client agrees on one job, the history survives a phone reload, and swapping in
-a robot that reports its own progress means replacing `_stage_for` alone.
+Keeping that state here rather than in the app still buys something real.
+Every client agrees on one job, the history survives a phone reload, and the
+robot side can report progress either by printing to stdout (parsed by
+`RobotClient`) or by POSTing to `/robot/job/stage/{stage}` directly.
 
 State is in memory, so a server restart clears it. That is fine for a single
 demo machine and wrong for anything else.
@@ -21,24 +22,25 @@ from datetime import datetime, timezone
 from threading import RLock
 
 from app.schemas.recommendations import GeminiRecommendation
-from app.schemas.robot import STAGES, HistoryEntry, RobotJobResponse
+from app.schemas.robot import (
+    SINGLE_STAGES,
+    TWO_ITEM_STAGES,
+    HistoryEntry,
+    RobotJobItem,
+    RobotJobResponse,
+)
 
-# How long each stage is assumed to take, in seconds. Only the last entry's
-# absence matters: "arrived" is terminal and the job stops advancing there.
-STAGE_SECONDS = (2.0, 6.0, 5.0, 6.0)
 HISTORY_LIMIT = 20
-
-# Where each failure interrupts the run: a missing item is discovered at the
-# pick, a blocked route on the drive out, a fault on the way back.
-FAILURE_STAGE = {"missing": 2, "blocked": 1, "fault": 3}
 
 
 class RobotJobService:
     def __init__(self) -> None:
         self._lock = RLock()
         self._started_at: float | None = None
-        self._shelf_number: int | None = None
-        self._item: str | None = None
+        self._stages: tuple[str, ...] = ()
+        self._stage_index = -1
+        self._items: list[RobotJobItem] = []
+        self._two_item = False
         self._failure: str | None = None
         self._simulated = True
         self._history: list[HistoryEntry] = []
@@ -46,42 +48,74 @@ class RobotJobService:
     # -- job ---------------------------------------------------------------
     def start(
         self,
-        recommendation: GeminiRecommendation,
+        recommendations: list[GeminiRecommendation],
         user_input: str,
+        two_item: bool = False,
         simulated: bool = True,
     ) -> None:
         with self._lock:
             self._started_at = time.monotonic()
-            self._shelf_number = recommendation.shelf_number
-            self._item = recommendation.item
+            self._stages = TWO_ITEM_STAGES if two_item else SINGLE_STAGES
+            self._stage_index = 0
+            self._items = [
+                RobotJobItem(shelf_number=rec.shelf_number, item=rec.item) for rec in recommendations
+            ]
+            self._two_item = two_item
             self._failure = None
             self._simulated = simulated
+            first = recommendations[0]
             self._record(
                 user_input=user_input,
-                item=recommendation.item,
-                shelf_number=recommendation.shelf_number,
+                item=first.item,
+                shelf_number=first.shelf_number,
                 succeeded=True,
                 failure=None,
             )
+
+    def advance(self, stage: str) -> None:
+        """Move to `stage` if it is a later stage of the current job.
+
+        Unknown stage keys are ignored rather than raising, since they may be
+        prose from a robot script version this backend does not recognize
+        yet -- better to sit still than to jump somewhere wrong. Stages never
+        move backwards: stdout can repeat a line (retries, logging) and that
+        must not undo progress already reported.
+        """
+        with self._lock:
+            if self._started_at is None or not self._stages:
+                return
+            try:
+                index = self._stages.index(stage)
+            except ValueError:
+                return
+            if index > self._stage_index:
+                self._stage_index = index
+
+    def complete(self) -> None:
+        with self._lock:
+            if self._started_at is None or not self._stages:
+                return
+            self._stage_index = len(self._stages) - 1
 
     def current(self) -> RobotJobResponse:
         with self._lock:
             if self._started_at is None:
                 return RobotJobResponse(active=False)
             elapsed = time.monotonic() - self._started_at
-            index = (
-                FAILURE_STAGE.get(self._failure, 0)
-                if self._failure
-                else self._stage_for(elapsed)
-            )
+            index = self._stage_index
+            stages = list(self._stages)
+            first = self._items[0] if self._items else None
             return RobotJobResponse(
-                active=self._failure is None and index < len(STAGES) - 1,
-                stage=STAGES[index],
+                active=self._failure is None and index < len(stages) - 1,
+                stage=stages[index] if 0 <= index < len(stages) else None,
                 stage_index=index,
-                shelf_number=self._shelf_number,
-                item=self._item,
+                stages=stages,
+                shelf_number=first.shelf_number if first else None,
+                item=first.item if first else None,
+                items=list(self._items),
                 elapsed_seconds=round(elapsed, 1),
                 failure=self._failure,
+                two_item=self._two_item,
                 simulated=self._simulated,
             )
 
@@ -98,6 +132,12 @@ class RobotJobService:
             return RobotJobResponse(active=False)
 
     def fail(self, failure: str) -> RobotJobResponse:
+        """Record a failure at whatever stage the job is currently at.
+
+        Earlier versions tried to guess which stage each failure kind
+        "belongs" to; now that stage advancement is real, the current index
+        already is that stage, so recording the failure is enough.
+        """
         with self._lock:
             if self._started_at is None:
                 return RobotJobResponse(active=False)
@@ -109,19 +149,12 @@ class RobotJobService:
                 )
             return self.current()
 
-    @staticmethod
-    def _stage_for(elapsed: float) -> int:
-        total = 0.0
-        for index, seconds in enumerate(STAGE_SECONDS):
-            total += seconds
-            if elapsed < total:
-                return index
-        return len(STAGES) - 1
-
     def _reset(self) -> None:
         self._started_at = None
-        self._shelf_number = None
-        self._item = None
+        self._stages = ()
+        self._stage_index = -1
+        self._items = []
+        self._two_item = False
         self._failure = None
         self._simulated = True
 

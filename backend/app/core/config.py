@@ -19,9 +19,16 @@ class Settings(BaseSettings):
     robot_app_dir: str = "/home/bracketbot/bbapps/hampy_demo"
     robot_station_by_shelf: str = "1:table_1,2:table_2,3:table_3"
     robot_dropoff_station: str = "table_2"
-    robot_pickup_motion_template: str = "motions/{station}_pickup.json"
-    robot_drop_motion: str = "motions/drop.json"
     robot_command_timeout_seconds: int = 240
+    # The workflow command run inside robot_app_dir. Overridable from .env so a
+    # robot-side rename (or an added --flag) never needs a code change here.
+    robot_command: str = "uv run transfer_both.py --execute --yes"
+    # Two-item mode asks Gemini for a pair and runs the four-stage job instead
+    # of the three-stage single-item one. Off by default for the simpler demo.
+    robot_two_item_mode: bool = False
+    robot_camera_url: str = "http://172.20.10.3:8082"
+    robot_camera_topic: str = "camera.head.jpeg"
+    robot_camera_timeout_seconds: float = 4.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
