@@ -84,26 +84,40 @@ class RobotClient:
         assert self.settings is not None
         station = self._station_for_shelf(recommendation.shelf_number)
         item_slug = self._slug(recommendation.item)
-        pickup_motion = self.settings.robot_pickup_motion_template.format(
-            shelf=recommendation.shelf_number,
-            station=station,
-            item=item_slug,
+        # Arm motions are optional. They have to be physically taught with
+        # Quest teleop or keyboard_teach before they exist, so leaving the
+        # template empty gives a drive-only run: navigate to the shelf, then to
+        # the drop-off, with the head camera streaming throughout.
+        pickup_template = self.settings.robot_pickup_motion_template.strip()
+        pickup_motion = (
+            pickup_template.format(
+                shelf=recommendation.shelf_number,
+                station=station,
+                item=item_slug,
+            )
+            if pickup_template
+            else ""
         )
         drop_motion = self.settings.robot_drop_motion.strip()
 
         parts = [
+            # A non-interactive `ssh host "cmd"` skips the login shell, so the
+            # robot's PATH lacks ~/.local/bin and every `uv run` below would die
+            # with "uv: command not found". Put it back before anything runs.
+            'export PATH="$HOME/.local/bin:$PATH"',
             f"cd {shlex.quote(self.settings.robot_app_dir)}",
-            f"test -f {shlex.quote(pickup_motion)}",
         ]
+        # Only guard the motions this run will actually replay, or an unused
+        # template would abort the drive before it started.
+        if pickup_motion:
+            parts.append(f"test -f {shlex.quote(pickup_motion)}")
         if drop_motion:
             parts.append(f"test -f {shlex.quote(drop_motion)}")
-        parts.extend(
-            [
-                self._nav_command(station),
-                self._replay_command(pickup_motion),
-                self._nav_command(self.settings.robot_dropoff_station),
-            ]
-        )
+
+        parts.append(self._nav_command(station))
+        if pickup_motion:
+            parts.append(self._replay_command(pickup_motion))
+        parts.append(self._nav_command(self.settings.robot_dropoff_station))
         if drop_motion:
             parts.append(self._replay_command(drop_motion))
         return " && ".join(parts)

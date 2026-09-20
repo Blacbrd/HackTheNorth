@@ -133,9 +133,9 @@ def test_robot_client_builds_ssh_delivery_workflow():
     command = RobotClient(settings)._transport_command(
         GeminiRecommendation(shelf_number=2, item="rice")
     )
-    assert command[:6] == ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
-    assert command[6] == "bracketbot@bracketbot-0186.local"
-    assert "station_nav.py table_2" in command[7]
+    assert command[:5] == ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
+    assert command[5] == "bracketbot@bracketbot-0186.local"
+    assert "station_nav.py table_2" in command[6]
 
 
 def test_robot_client_rejects_unmapped_shelf():
@@ -148,3 +148,24 @@ def test_robot_client_rejects_unmapped_shelf():
         assert "No robot station configured for shelf 9" in str(error)
     else:
         raise AssertionError("expected RobotCommandError")
+
+
+def test_robot_client_drives_without_arm_motions():
+    """Arm motions must be taught physically, so an empty template gives a
+    drive-only run rather than aborting on a `test -f` for a file nobody made."""
+    settings = Settings(
+        robot_enabled=True,
+        robot_station_by_shelf="1:table_1",
+        robot_dropoff_station="table_2",
+        robot_pickup_motion_template="",
+        robot_drop_motion="",
+    )
+    script = RobotClient(settings)._workflow_script(
+        GeminiRecommendation(shelf_number=1, item="peas")
+    )
+    assert "test -f" not in script
+    assert "replay_trajectory.py" not in script
+    assert "station_nav.py table_1" in script
+    assert "station_nav.py table_2" in script
+    # uv lives in ~/.local/bin, which a non-interactive ssh does not put on PATH.
+    assert script.startswith('export PATH="$HOME/.local/bin:$PATH"')
