@@ -7,3 +7,7 @@
 /node_modules/
 /.playwright/
 /.playwright-cli/
+
+# macOS finder metadata
+.DS_Store
+._*
