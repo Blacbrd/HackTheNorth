@@ -61,7 +61,6 @@ class RecommendationService:
                     recommendations,
                     user_input,
                     two_item=self.two_item_mode,
-                    simulated=not self.robot.enabled,
                 )
             try:
                 self.robot.send_pick_command(recommendations, self.jobs)

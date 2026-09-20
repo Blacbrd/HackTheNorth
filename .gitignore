@@ -11,3 +11,14 @@
 # macOS finder metadata
 .DS_Store
 ._*
+
+# Secrets and generated runtime data
+**/.env
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/node_modules/
+**/.expo/
+**/*.log
+robot/.lean_hold.*
+robot/captures/

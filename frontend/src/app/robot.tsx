@@ -198,9 +198,7 @@ export default function RobotScreen() {
               }}
             />
             <Text style={[styles.caveat, { color: palette.muted }]}>
-              {job.simulated
-                ? "No robot is attached — this run is a rehearsal."
-                : "Stages come from the robot as it reports them."}
+              Stages come from the robot as it reports them.
             </Text>
           </View>
         )}

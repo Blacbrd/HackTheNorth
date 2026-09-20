@@ -31,9 +31,6 @@ def test_job_reports_the_stage_it_has_reached():
     assert body["stages"] == ["picking", "driving", "arrived"]
     assert body["active"] is True
     assert body["item"] == "lentils"
-    # Says out loud that no real robot reported this run.
-    assert body["simulated"] is True
-
     jobs.advance("driving")
     assert client.get("/api/robot/job").json()["stage"] == "driving"
 
@@ -65,7 +62,7 @@ def test_complete_jumps_straight_to_the_last_stage():
     assert body.active is False
 
 
-def test_two_item_job_uses_the_four_stage_list():
+def test_two_item_job_uses_the_shared_route_stages():
     jobs = _fresh()
     jobs.start(
         [
@@ -76,7 +73,7 @@ def test_two_item_job_uses_the_four_stage_list():
         two_item=True,
     )
     body = client.get("/api/robot/job").json()
-    assert body["stages"] == ["queued", "dropping_first", "dropping_second", "arrived"]
+    assert body["stages"] == ["picking", "driving", "arrived"]
     assert body["two_item"] is True
     assert body["items"] == [
         {"shelf_number": 1, "item": "peas"},
@@ -153,10 +150,15 @@ def test_quantity_must_be_at_least_one():
     assert response.status_code == 422
 
 
-def test_disabled_robot_client_keeps_dummy_behavior():
+def test_disabled_robot_client_rejects_dispatch():
     robot = RobotClient()
     assert robot.enabled is False
-    robot.send_pick_command([GeminiRecommendation(shelf_number=1, item="peas")])
+    try:
+        robot.send_pick_command([GeminiRecommendation(shelf_number=1, item="peas")])
+    except RobotCommandError as error:
+        assert "disabled" in str(error)
+    else:
+        raise AssertionError("expected RobotCommandError")
 
 
 def test_robot_client_builds_local_delivery_command():
@@ -213,12 +215,12 @@ def test_marker_failure_line():
     assert complete is False
 
 
-def test_prose_fallback_differs_by_mode():
+def test_prose_compatibility_uses_the_shared_route_stage():
     line = "PICKUP COMPLETE: navigating to table_2 while holding the item..."
     single_stage, _, _ = _parse_stage_line(line, two_item=False)
     two_item_stage, _, _ = _parse_stage_line(line, two_item=True)
     assert single_stage == "driving"
-    assert two_item_stage == "dropping_first"
+    assert two_item_stage == "driving"
 
 
 def test_prose_completion_and_failure_lines():

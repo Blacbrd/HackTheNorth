@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ActivityIndicator, Image, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { apiUrl } from "@/services/api";
@@ -78,13 +78,18 @@ export function RobotCamera({
   const [feedStatus, setFeedStatus] = useState<Status>("connecting");
   const [seq, setSeq] = useState(0);
   const [shownUri, setShownUri] = useState<string | null>(null);
+  // `seq` restarts at zero whenever this screen is mounted. A session nonce
+  // prevents React Native's persistent image cache from replaying URLs from a
+  // previous run before it eventually catches up to the live frame numbers.
+  const cameraSession = useId().replace(/:/g, "");
   const lastFrame = useRef(0);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const status = feedStatus;
   const frameBase = baseUrl ?? defaultFrameUrl(topic);
   // The counter both defeats the image cache and identifies this frame.
-  const loadingUri = `${frameBase}?f=${seq}`;
+  const separator = frameBase.includes("?") ? "&" : "?";
+  const loadingUri = `${frameBase}${separator}session=${cameraSession}&f=${seq}`;
   const minInterval = Math.max(60, Math.round(1000 / Math.max(maxFps, 1)));
 
   const queueNext = (delay: number) => {

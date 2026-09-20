@@ -2,10 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-# Two stage lists because a two-item run genuinely has an extra step (drop the
-# first item, then the second) rather than just taking longer at one of these.
 SINGLE_STAGES = ("picking", "driving", "arrived")
-TWO_ITEM_STAGES = ("queued", "dropping_first", "dropping_second", "arrived")
 FAILURES = ("missing", "blocked", "fault")
 
 
@@ -29,9 +26,6 @@ class RobotJobResponse(BaseModel):
     elapsed_seconds: float = 0.0
     failure: str | None = None
     two_item: bool = False
-    # True only when no real robot is attached, i.e. send_pick_command just
-    # printed. A real run reports real stdout-driven stages.
-    simulated: bool = True
 
 
 class HistoryEntry(BaseModel):

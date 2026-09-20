@@ -81,7 +81,11 @@ async def camera_snapshot(settings: Settings = Depends(get_settings)) -> Respons
     return Response(
         content=frame,
         media_type="image/jpeg",
-        headers={"Cache-Control": "no-store"},
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )
 
 

@@ -40,8 +40,6 @@ export type RobotJob = {
   failure: RobotFailure | null;
   /** Whether this run is fetching two items rather than one. */
   two_item: boolean;
-  /** True when no real robot is attached — not whether stages are timed. */
-  simulated: boolean;
 };
 
 export type HistoryEntry = {

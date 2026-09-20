@@ -23,8 +23,7 @@ class Settings(BaseSettings):
     # The workflow command run inside robot_app_dir. Overridable from .env so a
     # robot-side rename (or an added --flag) never needs a code change here.
     robot_command: str = "uv run transfer_both.py --execute --yes"
-    # Two-item mode asks Gemini for a pair and runs the four-stage job instead
-    # of the three-stage single-item one. Off by default for the simpler demo.
+    # Two-item mode asks Gemini for a pair and exposes the corresponding stages.
     robot_two_item_mode: bool = False
     robot_camera_url: str = "http://172.20.10.3:8082"
     robot_camera_topic: str = "camera.head.jpeg"

@@ -20,21 +20,12 @@ class RobotCommandError(Exception):
     pass
 
 
-# The explicit "HAMPY_STAGE:"/"HAMPY_FAIL:" markers are the preferred way for
-# the robot script to report progress -- they are checked first below. These
-# prose tables are only a fallback for a robot process that predates those
-# markers, matched against the lines drop_both.py is already known to print.
-# The same line means different things depending on whether one or two items
-# are in flight, hence two tables.
+# Structured markers are preferred, while the prose mappings preserve
+# compatibility with earlier robot-runner output.
 _SINGLE_PROSE_STAGES: tuple[tuple[str, str], ...] = (
     ("PICKUP COMPLETE", "driving"),
     ("At table_2: extending", "driving"),
     ("Dropping: opening both grip", "arrived"),
-)
-_TWO_ITEM_PROSE_STAGES: tuple[tuple[str, str], ...] = (
-    ("PICKUP COMPLETE", "dropping_first"),
-    ("At table_2: extending", "dropping_second"),
-    ("Dropping: opening both grip", "dropping_second"),
 )
 _PROSE_COMPLETE = "TRANSFER COMPLETE"
 _PROSE_FAILURE = "NAVIGATION FAILED"
@@ -56,7 +47,7 @@ def _parse_stage_line(line: str, two_item: bool) -> tuple[str | None, str | None
         return None, None, True
     if _PROSE_FAILURE in line:
         return None, "blocked", False
-    for needle, stage in (_TWO_ITEM_PROSE_STAGES if two_item else _SINGLE_PROSE_STAGES):
+    for needle, stage in _SINGLE_PROSE_STAGES:
         if needle in line:
             return stage, None, False
     return None, None, False
@@ -78,15 +69,7 @@ class RobotClient:
         jobs: "RobotJobService | None" = None,
     ) -> None:
         if not self.enabled or self.settings is None:
-            # No jobs calls here -- the caller (RecommendationService) is the
-            # one that knows this run is simulated and records it as such.
-            for recommendation in recommendations:
-                print(
-                    f"Dummy robot command: move to shelf {recommendation.shelf_number}, "
-                    f"pick {recommendation.item}",
-                    flush=True,
-                )
-            return
+            raise RobotCommandError("Robot integration is disabled")
 
         two_item = len(recommendations) > 1
         command = self._transport_command()

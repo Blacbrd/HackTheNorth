@@ -10,8 +10,7 @@ Every client agrees on one job, the history survives a phone reload, and the
 robot side can report progress either by printing to stdout (parsed by
 `RobotClient`) or by POSTing to `/robot/job/stage/{stage}` directly.
 
-State is in memory, so a server restart clears it. That is fine for a single
-demo machine and wrong for anything else.
+State is in memory, so a server restart clears the active run.
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ from threading import RLock
 from app.schemas.recommendations import GeminiRecommendation
 from app.schemas.robot import (
     SINGLE_STAGES,
-    TWO_ITEM_STAGES,
     HistoryEntry,
     RobotJobItem,
     RobotJobResponse,
@@ -42,7 +40,6 @@ class RobotJobService:
         self._items: list[RobotJobItem] = []
         self._two_item = False
         self._failure: str | None = None
-        self._simulated = True
         self._history: list[HistoryEntry] = []
 
     # -- job ---------------------------------------------------------------
@@ -51,18 +48,16 @@ class RobotJobService:
         recommendations: list[GeminiRecommendation],
         user_input: str,
         two_item: bool = False,
-        simulated: bool = True,
     ) -> None:
         with self._lock:
             self._started_at = time.monotonic()
-            self._stages = TWO_ITEM_STAGES if two_item else SINGLE_STAGES
+            self._stages = SINGLE_STAGES
             self._stage_index = 0
             self._items = [
                 RobotJobItem(shelf_number=rec.shelf_number, item=rec.item) for rec in recommendations
             ]
             self._two_item = two_item
             self._failure = None
-            self._simulated = simulated
             first = recommendations[0]
             self._record(
                 user_input=user_input,
@@ -116,7 +111,6 @@ class RobotJobService:
                 elapsed_seconds=round(elapsed, 1),
                 failure=self._failure,
                 two_item=self._two_item,
-                simulated=self._simulated,
             )
 
     def recall(self) -> RobotJobResponse:
@@ -156,7 +150,6 @@ class RobotJobService:
         self._items = []
         self._two_item = False
         self._failure = None
-        self._simulated = True
 
     # -- history -----------------------------------------------------------
     def history(self) -> list[HistoryEntry]:

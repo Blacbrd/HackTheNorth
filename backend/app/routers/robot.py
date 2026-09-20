@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import get_robot_job_service
-from app.schemas.robot import FAILURES, SINGLE_STAGES, TWO_ITEM_STAGES, HistoryResponse, RobotJobResponse
+from app.schemas.robot import FAILURES, SINGLE_STAGES, HistoryResponse, RobotJobResponse
 from app.services.robot_jobs import RobotJobService
 
 router = APIRouter(prefix="/robot", tags=["robot"])
 
-_KNOWN_STAGES = set(SINGLE_STAGES) | set(TWO_ITEM_STAGES)
+_KNOWN_STAGES = set(SINGLE_STAGES)
 
 
 @router.get("/job", response_model=RobotJobResponse)
@@ -27,8 +27,7 @@ def clear(service: RobotJobService = Depends(get_robot_job_service)) -> RobotJob
 
 @router.post("/job/fail/{failure}", response_model=RobotJobResponse)
 def fail(failure: str, service: RobotJobService = Depends(get_robot_job_service)) -> RobotJobResponse:
-    """Force a failure. Exists so the failure states can be exercised without
-    staging a real obstacle in front of the robot."""
+    """Record a failure reported by the robot integration."""
     if failure not in FAILURES:
         raise HTTPException(status_code=400, detail=f"Unknown failure. Use one of: {', '.join(FAILURES)}")
     return service.fail(failure)

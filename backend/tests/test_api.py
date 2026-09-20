@@ -14,7 +14,7 @@ from app.services.robot_jobs import RobotJobService
 from app.services.transcriptions import TranscriptionService
 
 
-class FakeGemini:
+class StubGemini:
     def recommend(self, shelves: dict[int, list[str]], user_input: str, count: int = 1) -> list[GeminiRecommendation]:
         return [GeminiRecommendation(shelf_number=1, item="peas")]
 
@@ -43,7 +43,7 @@ class RecordingRobot(RobotClient):
 def build_client(tmp_path: Path, robot: RobotClient | None = None) -> TestClient:
     storage = StorageRepository(tmp_path / "storage.json")
     storage.path.write_text('{"1": ["peas"], "2": ["rice"]}', encoding="utf-8")
-    service = RecommendationService(storage, FakeGemini(), robot or RobotClient())
+    service = RecommendationService(storage, StubGemini(), robot or RobotClient())
     app.dependency_overrides[get_storage_repository] = lambda: storage
     app.dependency_overrides[get_recommendation_service] = lambda: service
     return TestClient(app)
@@ -99,7 +99,7 @@ def test_both_recommendation_origins_reuse_service(tmp_path: Path) -> None:
 
 
 def test_transcription_returns_plain_text_and_validates_uploads(tmp_path: Path) -> None:
-    app.dependency_overrides[get_transcription_service] = lambda: TranscriptionService(FakeGemini(), 10)
+    app.dependency_overrides[get_transcription_service] = lambda: TranscriptionService(StubGemini(), 10)
     with TestClient(app) as client:
         response = client.post(
             "/api/transcriptions",
@@ -116,7 +116,7 @@ def test_transcription_returns_plain_text_and_validates_uploads(tmp_path: Path) 
 def test_transcription_falls_back_to_the_filename_when_the_part_is_unlabelled() -> None:
     """The native uploaders can send octet-stream, or no type at all, for a
     recording the browser labels audio/m4a."""
-    app.dependency_overrides[get_transcription_service] = lambda: TranscriptionService(FakeGemini(), 10)
+    app.dependency_overrides[get_transcription_service] = lambda: TranscriptionService(StubGemini(), 10)
     with TestClient(app) as client:
         octet_stream = client.post(
             "/api/transcriptions",
