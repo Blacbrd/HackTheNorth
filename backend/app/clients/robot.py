@@ -1,24 +1,69 @@
 from __future__ import annotations
 
-import re
-import shlex
 import os
+import shlex
 import signal
 import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from app.core.config import Settings
 from app.schemas.recommendations import GeminiRecommendation
+
+if TYPE_CHECKING:
+    from app.services.robot_jobs import RobotJobService
 
 
 class RobotCommandError(Exception):
     pass
 
 
+# The explicit "HAMPY_STAGE:"/"HAMPY_FAIL:" markers are the preferred way for
+# the robot script to report progress -- they are checked first below. These
+# prose tables are only a fallback for a robot process that predates those
+# markers, matched against the lines drop_both.py is already known to print.
+# The same line means different things depending on whether one or two items
+# are in flight, hence two tables.
+_SINGLE_PROSE_STAGES: tuple[tuple[str, str], ...] = (
+    ("PICKUP COMPLETE", "driving"),
+    ("At table_2: extending", "driving"),
+    ("Dropping: opening both grip", "arrived"),
+)
+_TWO_ITEM_PROSE_STAGES: tuple[tuple[str, str], ...] = (
+    ("PICKUP COMPLETE", "dropping_first"),
+    ("At table_2: extending", "dropping_second"),
+    ("Dropping: opening both grip", "dropping_second"),
+)
+_PROSE_COMPLETE = "TRANSFER COMPLETE"
+_PROSE_FAILURE = "NAVIGATION FAILED"
+
+
+def _parse_stage_line(line: str, two_item: bool) -> tuple[str | None, str | None, bool]:
+    """Maps one line of robot stdout to (stage, failure, complete).
+
+    At most one of the three is ever non-empty/true for a given line. Unknown
+    lines return all-empty, which the caller just ignores.
+    """
+    if "HAMPY_STAGE:" in line:
+        token = line.split("HAMPY_STAGE:", 1)[1].strip().lower()
+        return (token or None), None, False
+    if "HAMPY_FAIL:" in line:
+        token = line.split("HAMPY_FAIL:", 1)[1].strip().lower()
+        return None, (token or None), False
+    if _PROSE_COMPLETE in line:
+        return None, None, True
+    if _PROSE_FAILURE in line:
+        return None, "blocked", False
+    for needle, stage in (_TWO_ITEM_PROSE_STAGES if two_item else _SINGLE_PROSE_STAGES):
+        if needle in line:
+            return stage, None, False
+    return None, None, False
+
+
 class RobotClient:
-    """Launch the robot-side Hampy scripts for a selected shelf item."""
+    """Launch the robot-side Hampy transfer script for the picked item(s)."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings
@@ -27,28 +72,36 @@ class RobotClient:
     def enabled(self) -> bool:
         return bool(self.settings and self.settings.robot_enabled)
 
-    def send_pick_command(self, recommendation: GeminiRecommendation) -> None:
+    def send_pick_command(
+        self,
+        recommendations: list[GeminiRecommendation],
+        jobs: "RobotJobService | None" = None,
+    ) -> None:
         if not self.enabled or self.settings is None:
-            print(
-                f"Dummy robot command: move to shelf {recommendation.shelf_number}, "
-                f"pick {recommendation.item}",
-                flush=True,
-            )
+            # No jobs calls here -- the caller (RecommendationService) is the
+            # one that knows this run is simulated and records it as such.
+            for recommendation in recommendations:
+                print(
+                    f"Dummy robot command: move to shelf {recommendation.shelf_number}, "
+                    f"pick {recommendation.item}",
+                    flush=True,
+                )
             return
 
-        command = self._transport_command(recommendation)
+        two_item = len(recommendations) > 1
+        command = self._transport_command()
         log_path = Path("robot-run.log").resolve()
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log = log_path.open("ab", buffering=0)
-        log.write(
-            f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] starting robot job: "
-            f"shelf={recommendation.shelf_number} item={recommendation.item}\n".encode()
-        )
+        log = log_path.open("a", buffering=1, encoding="utf-8", errors="replace")
+        items_desc = ", ".join(f"shelf={r.shelf_number} item={r.item}" for r in recommendations)
+        log.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] starting robot job: {items_desc}\n")
         try:
             process = subprocess.Popen(
                 command,
-                stdout=log,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
                 start_new_session=True,
             )
         except OSError as error:
@@ -56,14 +109,14 @@ class RobotClient:
             raise RobotCommandError(f"Could not start robot command: {error}") from error
 
         threading.Thread(
-            target=self._wait_and_log,
-            args=(process, log, self.settings.robot_command_timeout_seconds),
+            target=self._read_and_log,
+            args=(process, log, self.settings.robot_command_timeout_seconds, jobs, two_item),
             daemon=True,
         ).start()
 
-    def _transport_command(self, recommendation: GeminiRecommendation) -> list[str]:
+    def _transport_command(self) -> list[str]:
         assert self.settings is not None
-        script = self._workflow_script(recommendation)
+        script = self._workflow_script()
         transport = self.settings.robot_transport.strip().lower()
         if transport == "local":
             return ["bash", "-lc", script]
@@ -80,91 +133,68 @@ class RobotClient:
             ]
         raise RobotCommandError("ROBOT_TRANSPORT must be 'local' or 'ssh'")
 
-    def _workflow_script(self, recommendation: GeminiRecommendation) -> str:
+    def _workflow_script(self) -> str:
         assert self.settings is not None
-        station = self._station_for_shelf(recommendation.shelf_number)
-        item_slug = self._slug(recommendation.item)
-        # Arm motions are optional. They have to be physically taught with
-        # Quest teleop or keyboard_teach before they exist, so leaving the
-        # template empty gives a drive-only run: navigate to the shelf, then to
-        # the drop-off, with the head camera streaming throughout.
-        pickup_template = self.settings.robot_pickup_motion_template.strip()
-        pickup_motion = (
-            pickup_template.format(
-                shelf=recommendation.shelf_number,
-                station=station,
-                item=item_slug,
-            )
-            if pickup_template
-            else ""
-        )
-        drop_motion = self.settings.robot_drop_motion.strip()
-
-        parts = [
-            # A non-interactive `ssh host "cmd"` skips the login shell, so the
-            # robot's PATH lacks ~/.local/bin and every `uv run` below would die
-            # with "uv: command not found". Put it back before anything runs.
-            'export PATH="$HOME/.local/bin:$PATH"',
-            f"cd {shlex.quote(self.settings.robot_app_dir)}",
-        ]
-        # Only guard the motions this run will actually replay, or an unused
-        # template would abort the drive before it started.
-        if pickup_motion:
-            parts.append(f"test -f {shlex.quote(pickup_motion)}")
-        if drop_motion:
-            parts.append(f"test -f {shlex.quote(drop_motion)}")
-
-        parts.append(self._nav_command(station))
-        if pickup_motion:
-            parts.append(self._replay_command(pickup_motion))
-        parts.append(self._nav_command(self.settings.robot_dropoff_station))
-        if drop_motion:
-            parts.append(self._replay_command(drop_motion))
-        return " && ".join(parts)
-
-    def _nav_command(self, station: str) -> str:
-        return (
-            "uv run station_nav.py "
-            f"{shlex.quote(station)} --direct --no-marker --execute --yes"
+        return " && ".join(
+            [
+                # A non-interactive `ssh host "cmd"` skips the login shell, so
+                # the robot's PATH lacks ~/.local/bin and `uv run` would die
+                # with "uv: command not found". Put it back before anything
+                # runs.
+                'export PATH="$HOME/.local/bin:$PATH"',
+                f"cd {shlex.quote(self.settings.robot_app_dir)}",
+                self.settings.robot_command,
+            ]
         )
 
-    def _replay_command(self, motion: str) -> str:
-        return f"uv run replay_trajectory.py {shlex.quote(motion)} --execute --yes"
-
-    def _station_for_shelf(self, shelf_number: int) -> str:
-        assert self.settings is not None
-        mapping: dict[int, str] = {}
-        for chunk in self.settings.robot_station_by_shelf.split(","):
-            if not chunk.strip():
-                continue
-            try:
-                shelf, station = chunk.split(":", 1)
-                mapping[int(shelf.strip())] = station.strip()
-            except ValueError as error:
-                raise RobotCommandError(
-                    "ROBOT_STATION_BY_SHELF must look like '1:table_1,2:table_2'"
-                ) from error
-        try:
-            return mapping[shelf_number]
-        except KeyError as error:
-            raise RobotCommandError(
-                f"No robot station configured for shelf {shelf_number}"
-            ) from error
-
     @staticmethod
-    def _slug(value: str) -> str:
-        slug = re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")
-        return slug or "item"
+    def _read_and_log(
+        process: subprocess.Popen,
+        log,
+        timeout_seconds: int,
+        jobs: "RobotJobService | None",
+        two_item: bool,
+    ) -> None:
+        # `for line in process.stdout` blocks on readline(), so a monotonic
+        # deadline checked inside that loop would never fire while the robot
+        # process is simply quiet. A watchdog timer that kills the process
+        # group closes the pipe instead, which unblocks the loop on its own.
+        completed = False
+        failed = False
+        timed_out = threading.Event()
 
-    @staticmethod
-    def _wait_and_log(process: subprocess.Popen, log, timeout_seconds: int) -> None:
-        try:
+        def _kill_on_timeout() -> None:
+            timed_out.set()
             try:
-                code = process.wait(timeout=max(timeout_seconds, 1))
-            except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGTERM)
-                code = process.wait(timeout=5)
-                log.write(f"robot job timed out after {timeout_seconds}s\n".encode())
-            log.write(f"robot job exited with code {code}\n".encode())
+            except ProcessLookupError:
+                pass
+
+        timer = threading.Timer(max(timeout_seconds, 1), _kill_on_timeout)
+        timer.daemon = True
+        timer.start()
+        try:
+            assert process.stdout is not None
+            for line in process.stdout:
+                log.write(line)
+                stage, failure, complete = _parse_stage_line(line, two_item)
+                if jobs is not None:
+                    if failure:
+                        jobs.fail(failure)
+                        failed = True
+                    elif complete:
+                        jobs.complete()
+                        completed = True
+                    elif stage:
+                        jobs.advance(stage)
+
+            code = process.wait(timeout=5)
+            if timed_out.is_set():
+                log.write(f"robot job timed out after {timeout_seconds}s\n")
+            log.write(f"robot job exited with code {code}\n")
+
+            if code != 0 and jobs is not None and not failed and not completed:
+                jobs.fail("fault")
         finally:
+            timer.cancel()
             log.close()

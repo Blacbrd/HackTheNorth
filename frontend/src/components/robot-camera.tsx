@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { apiUrl } from "@/services/api";
 import { radius, usePalette } from "@/theme/tokens";
 import { CornerNotch } from "./shapes";
 
@@ -14,7 +15,11 @@ const STALL_MS = 6000;
 const DEFAULT_MAX_FPS = 12;
 /** Wait before retrying after a failed frame, so a dead link is not hammered. */
 const RETRY_MS = 700;
-/** The robot's forward-facing camera; `left`/`right` are the stereo pair. */
+/**
+ * The robot's forward-facing camera. `camera.left`/`camera.right` are the
+ * wrist cameras looking down at the grippers, not a view of the room, so this
+ * is the only topic worth showing a volunteer.
+ */
 const DEFAULT_TOPIC = "camera.head.jpeg";
 
 /** Warm off-white and a muted sand, readable on the near-black camera fill. */
@@ -24,7 +29,22 @@ const ON_CAMERA_MUTED = "#C3BCA3";
 type Status = "unavailable" | "connecting" | "live" | "stalled";
 
 /**
- * The robot's camera.
+ * Where frames come from.
+ *
+ * The proxy on our own backend is the default: the phone can always reach our
+ * server, but the robot's own camera server sits on the robot's subnet, which
+ * a phone on a different network (a hotspot, a different Wi-Fi) often cannot
+ * reach directly. EXPO_PUBLIC_ROBOT_CAMERA_URL is an escape hatch for hitting
+ * `camera_web.py` on the robot directly when the two do share a network.
+ */
+function defaultFrameUrl(topic: string): string {
+  const override = process.env.EXPO_PUBLIC_ROBOT_CAMERA_URL;
+  if (override) return `${override.replace(/\/$/, "")}/snapshot/${topic}.jpg`;
+  return `${apiUrl}/api/robot/camera.jpg`;
+}
+
+/**
+ * The robot's camera, viewed through our backend's proxy.
  *
  * `camera_web.py` serves single JPEGs from `/snapshot/<topic>.jpg` rather than
  * an MJPEG stream, so frames are polled. Two stacked images double-buffer
@@ -42,13 +62,14 @@ type Status = "unavailable" | "connecting" | "live" | "stalled";
 export function RobotCamera({
   shelfNumber,
   item,
-  baseUrl = process.env.EXPO_PUBLIC_ROBOT_CAMERA_URL,
+  baseUrl,
   topic = DEFAULT_TOPIC,
   maxFps = DEFAULT_MAX_FPS,
 }: {
   shelfNumber: number | null;
   item: string | null;
-  /** Origin of the robot's camera server, e.g. http://172.20.10.3:8082 */
+  /** Full frame URL, sans cache-busting query. Defaults to our backend's
+   *  camera proxy; see defaultFrameUrl for when that is overridden. */
   baseUrl?: string;
   topic?: string;
   maxFps?: number;
@@ -60,14 +81,10 @@ export function RobotCamera({
   const lastFrame = useRef(0);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Having no camera URL is not a state the feed transitions into — it is the
-  // absence of a camera, so it is derived rather than stored.
-  const status: Status = baseUrl ? feedStatus : "unavailable";
-  const origin = baseUrl?.replace(/\/$/, "");
+  const status = feedStatus;
+  const frameBase = baseUrl ?? defaultFrameUrl(topic);
   // The counter both defeats the image cache and identifies this frame.
-  const loadingUri = origin
-    ? `${origin}/snapshot/${topic}.jpg?f=${seq}`
-    : undefined;
+  const loadingUri = `${frameBase}?f=${seq}`;
   const minInterval = Math.max(60, Math.round(1000 / Math.max(maxFps, 1)));
 
   const queueNext = (delay: number) => {
@@ -76,7 +93,6 @@ export function RobotCamera({
   };
 
   useEffect(() => {
-    if (!origin) return;
     lastFrame.current = Date.now();
     const watchdog = setInterval(() => {
       setFeedStatus((current) =>
@@ -89,7 +105,7 @@ export function RobotCamera({
       clearInterval(watchdog);
       if (pending.current) clearTimeout(pending.current);
     };
-  }, [origin]);
+  }, [frameBase]);
 
   const caption =
     shelfNumber !== null && item
@@ -110,7 +126,7 @@ export function RobotCamera({
           source={{ uri: shownUri }}
           resizeMode="cover"
           style={[
-            StyleSheet.absoluteFill,
+            styles.eye,
             status === "stalled" && styles.stalled,
           ]}
           accessibilityLabel="Robot camera feed"
@@ -118,11 +134,11 @@ export function RobotCamera({
       ) : null}
 
       {/* The next frame, decoding out of sight. */}
-      {loadingUri && status !== "unavailable" ? (
+      {status !== "unavailable" ? (
         <Image
           source={{ uri: loadingUri }}
           resizeMode="cover"
-          style={[StyleSheet.absoluteFill, styles.buffering]}
+          style={[styles.eye, styles.buffering]}
           onLoad={() => {
             lastFrame.current = Date.now();
             setFeedStatus("live");
@@ -157,9 +173,8 @@ export function RobotCamera({
           />
           <Text style={styles.messageTitle}>Camera offline</Text>
           <Text style={styles.messageBody}>
-            {baseUrl
-              ? "No frames from the robot. It can still fetch the item."
-              : "No camera configured. Set EXPO_PUBLIC_ROBOT_CAMERA_URL."}
+            The backend can’t reach the robot’s camera. Check that
+            camera_web.py is running on the robot.
           </Text>
         </View>
       ) : null}
@@ -203,6 +218,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  /**
+   * `camera.head.jpeg` is a 2560x960 stereo pair — the two eyes side by side —
+   * and showing it whole would put a seam down the middle of the picture. The
+   * backend proxy already crops it to the left eye, which is 1280x960 and so
+   * exactly the 4:3 of this frame; cropping there rather than here halves what
+   * crosses the network, and the feed's rate is limited by bandwidth rather
+   * than by the laptop's CPU.
+   *
+   * `cover` therefore fills the frame with no crop at all in the normal case,
+   * and still degrades sensibly if the proxy ever passes a full pair through:
+   * a centre crop, rather than a squashed one.
+   */
+  eye: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   stalled: { opacity: 0.55 },
   buffering: { opacity: 0 },
   message: { alignItems: "center", padding: 20, gap: 6 },

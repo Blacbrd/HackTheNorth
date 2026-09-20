@@ -119,6 +119,8 @@ export const robotApi = {
     request<RobotJob>(`/api/robot/job/fail/${failure}`, { method: "POST" }),
   history: async (): Promise<HistoryEntry[]> =>
     (await request<HistoryResponse>("/api/robot/history")).entries,
+  cameraStatus: () =>
+    request<{ available: boolean; url: string }>("/api/robot/camera/status"),
 };
 
 /** The API only accepts a fixed set of audio MIME types, so derive one from

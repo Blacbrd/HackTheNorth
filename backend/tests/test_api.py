@@ -10,20 +10,21 @@ from app.main import app
 from app.repositories.storage import StorageRepository
 from app.schemas.recommendations import GeminiRecommendation
 from app.services.recommendations import RecommendationService
+from app.services.robot_jobs import RobotJobService
 from app.services.transcriptions import TranscriptionService
 
 
 class FakeGemini:
-    def recommend(self, shelves: dict[int, list[str]], user_input: str) -> GeminiRecommendation:
-        return GeminiRecommendation(shelf_number=1, item="peas")
+    def recommend(self, shelves: dict[int, list[str]], user_input: str, count: int = 1) -> list[GeminiRecommendation]:
+        return [GeminiRecommendation(shelf_number=1, item="peas")]
 
     def transcribe(self, audio: bytes, mime_type: str) -> str:
         return "I need something gluten free"
 
 
 class InvalidShelfGemini:
-    def recommend(self, shelves: dict[int, list[str]], user_input: str) -> GeminiRecommendation:
-        return GeminiRecommendation(shelf_number=99, item="peas")
+    def recommend(self, shelves: dict[int, list[str]], user_input: str, count: int = 1) -> list[GeminiRecommendation]:
+        return [GeminiRecommendation(shelf_number=99, item="peas")]
 
 
 class FailingTranscriptionGemini:
@@ -33,10 +34,10 @@ class FailingTranscriptionGemini:
 
 class RecordingRobot(RobotClient):
     def __init__(self) -> None:
-        self.commands: list[GeminiRecommendation] = []
+        self.commands: list[list[GeminiRecommendation]] = []
 
-    def send_pick_command(self, recommendation: GeminiRecommendation) -> None:
-        self.commands.append(recommendation)
+    def send_pick_command(self, recommendations: list[GeminiRecommendation], jobs: RobotJobService | None = None) -> None:
+        self.commands.append(recommendations)
 
 
 def build_client(tmp_path: Path, robot: RobotClient | None = None) -> TestClient:
@@ -79,9 +80,21 @@ def test_both_recommendation_origins_reuse_service(tmp_path: Path) -> None:
     with build_client(tmp_path, robot) as client:
         app_result = client.post("/api/recommendations/app", json={"user_input": "a vegetable"})
         robot_result = client.post("/api/recommendations/robot", json={"user_input": "a vegetable"})
-    assert app_result.json() == {"shelf_number": 1, "item": "peas", "source": "app"}
-    assert robot_result.json() == {"shelf_number": 1, "item": "peas", "source": "robot"}
-    assert robot.commands == [GeminiRecommendation(shelf_number=1, item="peas")]
+    expected_items = [{"shelf_number": 1, "item": "peas"}]
+    assert app_result.json() == {
+        "items": expected_items,
+        "source": "app",
+        "shelf_number": 1,
+        "item": "peas",
+    }
+    assert robot_result.json() == {
+        "items": expected_items,
+        "source": "robot",
+        "shelf_number": 1,
+        "item": "peas",
+    }
+    # send_to_robot is only true for the /app route, so only one dispatch happened.
+    assert robot.commands == [[GeminiRecommendation(shelf_number=1, item="peas")]]
     app.dependency_overrides.clear()
 
 

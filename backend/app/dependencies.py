@@ -29,6 +29,7 @@ def get_recommendation_service() -> RecommendationService:
         gemini,
         RobotClient(settings),
         get_robot_job_service(),
+        two_item_mode=settings.robot_two_item_mode,
     )
 
 

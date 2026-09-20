@@ -26,5 +26,17 @@ class GeminiRecommendation(BaseModel):
         return value
 
 
-class RecommendationResponse(GeminiRecommendation):
+class GeminiRecommendationList(BaseModel):
+    """Wraps Gemini's two-item picks so response_schema has a single object to
+    fill in, rather than a bare list Gemini's structured output cannot target."""
+
+    items: list[GeminiRecommendation] = Field(min_length=1, max_length=2)
+
+
+class RecommendationResponse(BaseModel):
+    items: list[GeminiRecommendation]
     source: str
+    # Mirror items[0] so a client that only ever knew about one item keeps
+    # working without change.
+    shelf_number: int | None = None
+    item: str | None = None
