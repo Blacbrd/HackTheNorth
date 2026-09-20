@@ -6,6 +6,16 @@ import { CornerNotch } from "./shapes";
 
 /** How long without a decoded frame before the feed counts as stalled. */
 const STALL_MS = 6000;
+/**
+ * Ceiling on how often a frame is requested. The real rate settles lower on
+ * its own, because the next request only goes out once the previous frame has
+ * decoded — the link, not this number, is what limits throughput.
+ */
+const DEFAULT_MAX_FPS = 12;
+/** Wait before retrying after a failed frame, so a dead link is not hammered. */
+const RETRY_MS = 700;
+/** The robot's forward-facing camera; `left`/`right` are the stereo pair. */
+const DEFAULT_TOPIC = "camera.head.jpeg";
 
 /** Warm off-white and a muted sand, readable on the near-black camera fill. */
 const ON_CAMERA = "#F3ECD6";
@@ -16,31 +26,57 @@ type Status = "unavailable" | "connecting" | "live" | "stalled";
 /**
  * The robot's camera.
  *
- * The stream is MJPEG, which React Native renders as a never-finishing Image.
- * That means there is no "it broke" event to listen for — onLoad fires once and
- * a frozen feed looks identical to a live one. So a watchdog treats silence as
- * a stall, which is client-side guesswork and labelled as such.
+ * `camera_web.py` serves single JPEGs from `/snapshot/<topic>.jpg` rather than
+ * an MJPEG stream, so frames are polled. Two stacked images double-buffer
+ * them: the next frame decodes underneath at zero opacity and is only promoted
+ * once it has actually loaded. Swapping a single image's source instead leaves
+ * a blank gap while each ~400KB frame decodes, which reads as flashing.
+ *
+ * Requests are paced off completions rather than a fixed timer. A timer faster
+ * than the link builds a backlog of stale frames; waiting for each frame keeps
+ * the feed at whatever rate the network genuinely sustains.
+ *
+ * A poll that never resolves looks exactly like a frozen feed, so a watchdog
+ * treats silence as a stall. That is client-side guesswork, labelled as such.
  */
 export function RobotCamera({
   shelfNumber,
   item,
-  streamUrl = process.env.EXPO_PUBLIC_ROBOT_CAMERA_URL,
+  baseUrl = process.env.EXPO_PUBLIC_ROBOT_CAMERA_URL,
+  topic = DEFAULT_TOPIC,
+  maxFps = DEFAULT_MAX_FPS,
 }: {
   shelfNumber: number | null;
   item: string | null;
-  streamUrl?: string;
+  /** Origin of the robot's camera server, e.g. http://172.20.10.3:8082 */
+  baseUrl?: string;
+  topic?: string;
+  maxFps?: number;
 }) {
   const palette = usePalette();
   const [feedStatus, setFeedStatus] = useState<Status>("connecting");
-  // Stamped by the effect below before the watchdog first reads it.
+  const [seq, setSeq] = useState(0);
+  const [shownUri, setShownUri] = useState<string | null>(null);
   const lastFrame = useRef(0);
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Having no stream URL is not a state the feed transitions into — it is the
+  // Having no camera URL is not a state the feed transitions into — it is the
   // absence of a camera, so it is derived rather than stored.
-  const status: Status = streamUrl ? feedStatus : "unavailable";
+  const status: Status = baseUrl ? feedStatus : "unavailable";
+  const origin = baseUrl?.replace(/\/$/, "");
+  // The counter both defeats the image cache and identifies this frame.
+  const loadingUri = origin
+    ? `${origin}/snapshot/${topic}.jpg?f=${seq}`
+    : undefined;
+  const minInterval = Math.max(60, Math.round(1000 / Math.max(maxFps, 1)));
+
+  const queueNext = (delay: number) => {
+    if (pending.current) clearTimeout(pending.current);
+    pending.current = setTimeout(() => setSeq((n) => n + 1), delay);
+  };
 
   useEffect(() => {
-    if (!streamUrl) return;
+    if (!origin) return;
     lastFrame.current = Date.now();
     const watchdog = setInterval(() => {
       setFeedStatus((current) =>
@@ -49,8 +85,11 @@ export function RobotCamera({
           : current,
       );
     }, 1500);
-    return () => clearInterval(watchdog);
-  }, [streamUrl]);
+    return () => {
+      clearInterval(watchdog);
+      if (pending.current) clearTimeout(pending.current);
+    };
+  }, [origin]);
 
   const caption =
     shelfNumber !== null && item
@@ -65,23 +104,39 @@ export function RobotCamera({
         { backgroundColor: palette.cameraBackground, borderColor: palette.line },
       ]}
     >
-      {streamUrl && status !== "unavailable" ? (
+      {/* The frame currently on screen. It stays put while the next decodes. */}
+      {shownUri && status !== "unavailable" ? (
         <Image
-          source={{ uri: streamUrl }}
+          source={{ uri: shownUri }}
           resizeMode="cover"
           style={[
             StyleSheet.absoluteFill,
             status === "stalled" && styles.stalled,
           ]}
-          onLoadStart={() => {
-            lastFrame.current = Date.now();
-          }}
+          accessibilityLabel="Robot camera feed"
+        />
+      ) : null}
+
+      {/* The next frame, decoding out of sight. */}
+      {loadingUri && status !== "unavailable" ? (
+        <Image
+          source={{ uri: loadingUri }}
+          resizeMode="cover"
+          style={[StyleSheet.absoluteFill, styles.buffering]}
           onLoad={() => {
             lastFrame.current = Date.now();
             setFeedStatus("live");
+            setShownUri(loadingUri);
+            queueNext(minInterval);
           }}
-          onError={() => setFeedStatus("unavailable")}
-          accessibilityLabel="Robot camera feed"
+          // One dropped frame is normal on a busy link; only the watchdog
+          // decides the feed has actually gone away.
+          onError={() => {
+            if (Date.now() - lastFrame.current > STALL_MS) {
+              setFeedStatus("unavailable");
+            }
+            queueNext(RETRY_MS);
+          }}
         />
       ) : null}
 
@@ -102,7 +157,9 @@ export function RobotCamera({
           />
           <Text style={styles.messageTitle}>Camera offline</Text>
           <Text style={styles.messageBody}>
-            No video from the robot. It can still fetch the item.
+            {baseUrl
+              ? "No frames from the robot. It can still fetch the item."
+              : "No camera configured. Set EXPO_PUBLIC_ROBOT_CAMERA_URL."}
           </Text>
         </View>
       ) : null}
@@ -147,6 +204,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stalled: { opacity: 0.55 },
+  buffering: { opacity: 0 },
   message: { alignItems: "center", padding: 20, gap: 6 },
   messageTitle: { color: ON_CAMERA, fontSize: 15, fontWeight: "800" },
   messageBody: {

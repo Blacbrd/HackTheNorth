@@ -15,8 +15,10 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppButton } from "@/components/app-button";
+import { RobotCamera } from "@/components/robot-camera";
 import { Hex, NotchedSurface } from "@/components/shapes";
 import { Card, ErrorPanel, Help, Kicker, Title, layout } from "@/components/ui";
+import { useRobotJob } from "@/hooks/use-robot-job";
 import { useVoiceRequest } from "@/hooks/use-voice-request";
 import { usePressed } from "@/lib/use-pressed";
 import { recommendationApi } from "@/services/api";
@@ -28,6 +30,7 @@ const MIC_SIZE = 118;
 export default function AskScreen() {
   const palette = usePalette();
   const mic = usePressed();
+  const { job } = useRobotJob();
   const [request, setRequest] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,6 +176,23 @@ export default function AskScreen() {
           </View>
         </NotchedSurface>
 
+        <View style={styles.visionBlock}>
+          <View style={styles.visionHead}>
+            <Text style={[styles.visionTitle, { color: palette.ink }]}>
+              What the robot sees
+            </Text>
+            <Help>
+              {job?.active || job?.failure
+                ? "Live from the robot while it works"
+                : "Live view from the robot's camera"}
+            </Help>
+          </View>
+          <RobotCamera
+            shelfNumber={job?.shelf_number ?? null}
+            item={job?.item ?? null}
+          />
+        </View>
+
         {error || voice.error ? (
           <ErrorPanel
             title="That didn’t work"
@@ -291,6 +311,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   textarea: { minHeight: 84, fontSize: 16, lineHeight: 23, padding: 0 },
+  visionBlock: { gap: 10 },
+  visionHead: { gap: 2 },
+  visionTitle: { fontSize: 17, fontWeight: "800", letterSpacing: -0.2 },
   thinking: { flexDirection: "row", alignItems: "center", gap: 12 },
   thinkingText: { flex: 1, minWidth: 0 },
   thinkingTitle: { fontSize: 15, fontWeight: "800" },
