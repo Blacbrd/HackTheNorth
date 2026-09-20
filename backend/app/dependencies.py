@@ -24,7 +24,12 @@ def get_robot_job_service() -> RobotJobService:
 def get_recommendation_service() -> RecommendationService:
     settings = get_settings()
     gemini = GeminiClient(settings.gemini_api_key, settings.gemini_model) if settings.gemini_api_key else None
-    return RecommendationService(get_storage_repository(), gemini, RobotClient(), get_robot_job_service())
+    return RecommendationService(
+        get_storage_repository(),
+        gemini,
+        RobotClient(settings),
+        get_robot_job_service(),
+    )
 
 
 @lru_cache

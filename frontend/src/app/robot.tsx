@@ -178,12 +178,11 @@ export default function RobotScreen() {
                 router.replace("/");
               }}
             />
-            {job.simulated ? (
-              <Text style={[styles.caveat, { color: palette.muted }]}>
-                Stages advance on a server timer — the robot does not report its
-                own progress yet, and recall only clears the job here.
-              </Text>
-            ) : null}
+            <Text style={[styles.caveat, { color: palette.muted }]}>
+              {job.simulated
+                ? "Stages advance on a server timer — the robot does not report its own progress yet, and recall only clears the job here."
+                : "Robot mode is on. Stages are still approximate because the robot process does not stream live progress back yet."}
+            </Text>
           </View>
         )}
       </ScrollView>

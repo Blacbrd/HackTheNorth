@@ -40,15 +40,22 @@ class RobotJobService:
         self._shelf_number: int | None = None
         self._item: str | None = None
         self._failure: str | None = None
+        self._simulated = True
         self._history: list[HistoryEntry] = []
 
     # -- job ---------------------------------------------------------------
-    def start(self, recommendation: GeminiRecommendation, user_input: str) -> None:
+    def start(
+        self,
+        recommendation: GeminiRecommendation,
+        user_input: str,
+        simulated: bool = True,
+    ) -> None:
         with self._lock:
             self._started_at = time.monotonic()
             self._shelf_number = recommendation.shelf_number
             self._item = recommendation.item
             self._failure = None
+            self._simulated = simulated
             self._record(
                 user_input=user_input,
                 item=recommendation.item,
@@ -75,6 +82,7 @@ class RobotJobService:
                 item=self._item,
                 elapsed_seconds=round(elapsed, 1),
                 failure=self._failure,
+                simulated=self._simulated,
             )
 
     def recall(self) -> RobotJobResponse:
@@ -115,6 +123,7 @@ class RobotJobService:
         self._shelf_number = None
         self._item = None
         self._failure = None
+        self._simulated = True
 
     # -- history -----------------------------------------------------------
     def history(self) -> list[HistoryEntry]:
